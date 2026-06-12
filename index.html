@@ -3,373 +3,405 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>게시판</title>
+  <title>다영에게 💌</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600&family=Gowun+Dodum&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --primary: #4f46e5;
-      --primary-hover: #4338ca;
-      --bg: #f8fafc;
-      --card: #ffffff;
-      --border: #e2e8f0;
-      --text: #1e293b;
-      --muted: #64748b;
-      --danger: #ef4444;
+      --rose: #e8a0b4;
+      --rose-deep: #c96b8a;
+      --rose-light: #fce4ec;
+      --cream: #fff9f5;
+      --ink: #4a3540;
+      --gold: #d4a574;
     }
+
+    html { scroll-behavior: smooth; }
 
     body {
-      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-      background: var(--bg);
-      color: var(--text);
+      font-family: 'Gowun Dodum', sans-serif;
+      background: linear-gradient(160deg, #1a0f14 0%, #2d1a24 40%, #1a0f14 100%);
+      color: var(--ink);
       min-height: 100vh;
+      overflow-x: hidden;
     }
 
-    header {
-      background: var(--primary);
-      color: #fff;
-      padding: 1rem 0;
-      box-shadow: 0 2px 8px rgba(79,70,229,.3);
+    /* 떠다니는 하트 */
+    .hearts {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
     }
 
-    header .inner {
-      max-width: 860px;
-      margin: 0 auto;
-      padding: 0 1.25rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: -.5px; }
-    header span { font-size: .85rem; opacity: .8; }
-
-    main {
-      max-width: 860px;
-      margin: 2rem auto;
-      padding: 0 1.25rem;
-    }
-
-    /* 작성 폼 */
-    .form-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1.5rem;
-      margin-bottom: 2rem;
-      box-shadow: 0 1px 4px rgba(0,0,0,.06);
-    }
-
-    .form-card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: var(--primary); }
-
-    .form-row { display: flex; gap: .75rem; margin-bottom: .75rem; }
-    .form-row input { flex: 1; }
-
-    input, textarea {
-      width: 100%;
-      padding: .6rem .9rem;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: .92rem;
-      font-family: inherit;
-      color: var(--text);
-      transition: border-color .15s;
-      background: #fafafa;
-    }
-
-    input:focus, textarea:focus {
-      outline: none;
-      border-color: var(--primary);
-      background: #fff;
-    }
-
-    textarea { resize: vertical; min-height: 90px; }
-
-    .form-actions { display: flex; justify-content: flex-end; margin-top: .75rem; }
-
-    button {
-      padding: .55rem 1.3rem;
-      border: none;
-      border-radius: 8px;
-      font-size: .9rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background .15s, transform .1s;
-    }
-
-    .btn-primary { background: var(--primary); color: #fff; }
-    .btn-primary:hover { background: var(--primary-hover); }
-    .btn-primary:active { transform: scale(.97); }
-
-    .btn-delete {
-      background: none;
-      color: var(--danger);
-      border: 1px solid var(--danger);
-      padding: .3rem .75rem;
-      font-size: .8rem;
-    }
-    .btn-delete:hover { background: #fef2f2; }
-
-    /* 검색 & 카운트 */
-    .toolbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 1rem;
-      gap: .75rem;
-      flex-wrap: wrap;
-    }
-
-    .toolbar input { max-width: 260px; }
-
-    .post-count { font-size: .85rem; color: var(--muted); white-space: nowrap; }
-
-    /* 게시글 목록 */
-    .post-list { display: flex; flex-direction: column; gap: .75rem; }
-
-    .post-item {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1.1rem 1.25rem;
-      box-shadow: 0 1px 4px rgba(0,0,0,.05);
-      transition: box-shadow .15s;
-    }
-
-    .post-item:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
-
-    .post-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: .5rem;
-    }
-
-    .post-title {
+    .heart {
+      position: absolute;
+      bottom: -40px;
       font-size: 1rem;
-      font-weight: 600;
-      cursor: pointer;
-      color: var(--text);
+      opacity: 0;
+      animation: floatUp linear infinite;
     }
 
-    .post-title:hover { color: var(--primary); }
-
-    .post-meta {
-      font-size: .78rem;
-      color: var(--muted);
-      margin-top: .3rem;
+    @keyframes floatUp {
+      0%   { transform: translateY(0) rotate(0deg); opacity: 0; }
+      10%  { opacity: .6; }
+      90%  { opacity: .3; }
+      100% { transform: translateY(-110vh) rotate(360deg); opacity: 0; }
     }
 
-    .post-meta span + span::before { content: ' · '; }
-
-    .post-body {
-      margin-top: .75rem;
-      font-size: .9rem;
-      line-height: 1.65;
-      color: #334155;
-      white-space: pre-wrap;
-      display: none;
-      border-top: 1px solid var(--border);
-      padding-top: .75rem;
-    }
-
-    .post-body.open { display: block; }
-
-    .empty {
-      text-align: center;
-      padding: 3rem 1rem;
-      color: var(--muted);
-      font-size: .95rem;
-    }
-
-    /* 페이지네이션 */
-    .pagination {
+    /* ── 커버 (봉투) ── */
+    #cover {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
       display: flex;
+      flex-direction: column;
+      align-items: center;
       justify-content: center;
-      gap: .4rem;
-      margin-top: 1.75rem;
+      background: linear-gradient(160deg, #1a0f14 0%, #3d2030 50%, #1a0f14 100%);
+      transition: opacity .8s ease, transform .8s ease;
     }
 
-    .pagination button {
-      width: 36px;
-      height: 36px;
-      padding: 0;
-      border-radius: 8px;
+    #cover.hide {
+      opacity: 0;
+      transform: scale(1.05);
+      pointer-events: none;
+    }
+
+    .cover-greeting {
+      font-family: 'Noto Serif KR', serif;
+      font-size: clamp(1.6rem, 5vw, 2.4rem);
+      color: var(--rose-light);
+      letter-spacing: .15em;
+      margin-bottom: 2.5rem;
+      text-align: center;
+      line-height: 1.6;
+    }
+
+    .cover-greeting em {
+      font-style: normal;
+      color: var(--rose);
+      font-size: 1.2em;
+    }
+
+    .envelope {
+      position: relative;
+      width: 220px;
+      height: 150px;
+      cursor: pointer;
+      transition: transform .3s ease;
+    }
+
+    .envelope:hover { transform: scale(1.05); }
+    .envelope:active { transform: scale(.97); }
+
+    .env-body {
+      position: absolute;
+      bottom: 0;
+      width: 100%;
+      height: 120px;
+      background: linear-gradient(135deg, #f5c6d6, #e8a0b4);
+      border-radius: 0 0 8px 8px;
+      box-shadow: 0 12px 40px rgba(232,160,180,.4);
+    }
+
+    .env-flap {
+      position: absolute;
+      top: 30px;
+      left: 0;
+      width: 0;
+      height: 0;
+      border-left: 110px solid transparent;
+      border-right: 110px solid transparent;
+      border-top: 80px solid #f0b0c4;
+      transform-origin: top center;
+      transition: transform .6s ease;
+      z-index: 2;
+    }
+
+    .envelope.open .env-flap {
+      transform: rotateX(180deg);
+    }
+
+    .env-letter-peek {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 180px;
+      height: 60px;
+      background: var(--cream);
+      border-radius: 4px 4px 0 0;
+      z-index: 1;
+      transition: bottom .6s ease .3s, height .6s ease .3s;
+    }
+
+    .envelope.open .env-letter-peek {
+      bottom: 40px;
+      height: 90px;
+    }
+
+    .cover-hint {
+      margin-top: 2rem;
       font-size: .85rem;
-      background: var(--card);
-      color: var(--text);
-      border: 1px solid var(--border);
-      font-weight: 500;
+      color: rgba(252,228,236,.5);
+      letter-spacing: .1em;
+      animation: pulse 2s ease infinite;
     }
 
-    .pagination button.active {
-      background: var(--primary);
-      color: #fff;
-      border-color: var(--primary);
+    @keyframes pulse {
+      0%, 100% { opacity: .5; }
+      50%       { opacity: 1; }
     }
 
-    .pagination button:hover:not(.active) { background: var(--bg); }
+    /* ── 편지 본문 ── */
+    #letter-page {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      padding: 3rem 1.25rem 5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      opacity: 0;
+      transition: opacity 1s ease .3s;
+    }
 
-    @media (max-width: 600px) {
-      .form-row { flex-direction: column; }
-      header .inner { flex-direction: column; gap: .25rem; text-align: center; }
+    #letter-page.show { opacity: 1; }
+
+    .letter-paper {
+      max-width: 560px;
+      width: 100%;
+      background: var(--cream);
+      border-radius: 4px;
+      padding: clamp(2rem, 6vw, 3.5rem) clamp(1.5rem, 5vw, 3rem);
+      box-shadow:
+        0 2px 0 var(--gold),
+        0 20px 60px rgba(0,0,0,.5),
+        inset 0 0 80px rgba(212,165,116,.08);
+      position: relative;
+      transform: translateY(30px);
+      opacity: 0;
+      transition: transform .8s ease .5s, opacity .8s ease .5s;
+    }
+
+    #letter-page.show .letter-paper {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    /* 종이 질감 */
+    .letter-paper::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        transparent,
+        transparent 27px,
+        rgba(212,165,116,.15) 27px,
+        rgba(212,165,116,.15) 28px
+      );
+      border-radius: 4px;
+      pointer-events: none;
+    }
+
+    .letter-date {
+      text-align: right;
+      font-size: .8rem;
+      color: var(--gold);
+      margin-bottom: 2rem;
+      letter-spacing: .05em;
+    }
+
+    .letter-to {
+      font-family: 'Noto Serif KR', serif;
+      font-size: clamp(1.1rem, 3.5vw, 1.35rem);
+      color: var(--rose-deep);
+      margin-bottom: 1.75rem;
+      font-weight: 600;
+    }
+
+    .letter-body {
+      font-family: 'Noto Serif KR', serif;
+      font-size: clamp(.95rem, 2.8vw, 1.05rem);
+      line-height: 2.1;
+      color: var(--ink);
+      position: relative;
+      z-index: 1;
+    }
+
+    .letter-body p {
+      margin-bottom: 1.4rem;
+      opacity: 0;
+      transform: translateY(12px);
+    }
+
+    .letter-body p.visible {
+      animation: fadeLine .7s ease forwards;
+    }
+
+    @keyframes fadeLine {
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .letter-body .highlight {
+      color: var(--rose-deep);
+      font-weight: 600;
+    }
+
+    .letter-sign {
+      margin-top: 2.5rem;
+      text-align: right;
+      font-family: 'Noto Serif KR', serif;
+      font-size: 1rem;
+      color: var(--rose-deep);
+      opacity: 0;
+    }
+
+    .letter-sign.visible {
+      animation: fadeLine .7s ease forwards;
+    }
+
+    .letter-sign .name {
+      display: block;
+      font-size: 1.2rem;
+      margin-top: .4rem;
+      letter-spacing: .2em;
+    }
+
+    /* 하단 장식 */
+    .footer-note {
+      margin-top: 2.5rem;
+      text-align: center;
+      font-size: .78rem;
+      color: rgba(252,228,236,.35);
+      letter-spacing: .15em;
+    }
+
+    /* 작은 꽃 장식 */
+    .deco-flower {
+      text-align: center;
+      font-size: 1.4rem;
+      margin: 1.5rem 0;
+      opacity: 0;
+    }
+
+    .deco-flower.visible {
+      animation: fadeLine .7s ease forwards;
+    }
+
+    @media (max-width: 480px) {
+      .envelope { width: 180px; height: 130px; }
+      .env-flap {
+        border-left-width: 90px;
+        border-right-width: 90px;
+        border-top-width: 65px;
+      }
+      .env-letter-peek { width: 150px; }
     }
   </style>
 </head>
 <body>
 
-<header>
-  <div class="inner">
-    <h1>📋 자유 게시판</h1>
-    <span id="dateDisplay"></span>
-  </div>
-</header>
+<!-- 떠다니는 하트 -->
+<div class="hearts" id="hearts"></div>
 
-<main>
-  <!-- 작성 폼 -->
-  <div class="form-card">
-    <h2>✏️ 새 글 작성</h2>
-    <div class="form-row">
-      <input type="text" id="inputAuthor" placeholder="작성자" maxlength="20" />
-      <input type="text" id="inputTitle" placeholder="제목" maxlength="60" />
+<!-- 커버: 봉투 -->
+<div id="cover">
+  <p class="cover-greeting">
+    <em>다영</em>아,<br />편지가 도착했어
+  </p>
+
+  <div class="envelope" id="envelope" onclick="openLetter()" role="button" aria-label="편지 열기">
+    <div class="env-flap"></div>
+    <div class="env-letter-peek"></div>
+    <div class="env-body"></div>
+  </div>
+
+  <p class="cover-hint">봉투를 눌러 편지를 열어봐 ♡</p>
+</div>
+
+<!-- 편지 본문 -->
+<main id="letter-page">
+  <article class="letter-paper">
+    <p class="letter-date" id="letterDate"></p>
+
+    <p class="letter-to">사랑하는 다영에게,</p>
+
+    <div class="letter-body" id="letterBody">
+      <p>안녕, 다영아.<br />이 편지를 읽고 있다는 건, 내가 너를 얼마나 생각하며 이걸 만들었는지 알아줬으면 해.</p>
+
+      <p>매일 아침 눈을 뜨면 가장 먼저 떠오르는 사람이 <span class="highlight">너</span>야. 네 목소리, 네 웃음, 가끔은 삐지는 표정까지 — 다 소중하고, 다 좋아.</p>
+
+      <p>함께한 날들 하나하나가 내게는 그냥 시간이 아니야. 너와 걸었던 길, 같이 먹었던 밥, 아무 말 없이 나란히 앉아 있던 그 순간들. 그게 내 하루를 빛나게 만들어.</p>
+
+      <p>가끔은 내가 부족해서 미안할 때도 있어. 그래도 변함없이 곁에 있어줘서, 나를 믿어줘서, 정말 고마워. 네가 있어서 나는 더 나은 사람이 되고 싶다는 마음이 생겨.</p>
+
+      <p>앞으로도 함께 많은 계절을 지나고, 웃고, 가끔은 힘들어도 손 놓지 않고 걸어가자. 내 옆자리는 <span class="highlight">항상 다영 자리</span>야.</p>
+
+      <p>오늘도, 내일도, 그리고 그다음 날도 —<br />세상에서 제일 사랑해.</p>
     </div>
-    <textarea id="inputContent" placeholder="내용을 입력하세요..."></textarea>
-    <div class="form-actions">
-      <button class="btn-primary" onclick="submitPost()">등록하기</button>
+
+    <div class="deco-flower" id="decoFlower">🌸 ✿ 🌸</div>
+
+    <div class="letter-sign" id="letterSign">
+      늘 네 편인,
+      <span class="name">성주 올림 ♡</span>
     </div>
-  </div>
+  </article>
 
-  <!-- 툴바 -->
-  <div class="toolbar">
-    <input type="text" id="searchInput" placeholder="🔍  제목 또는 작성자 검색" oninput="renderPosts()" />
-    <span class="post-count" id="postCount"></span>
-  </div>
-
-  <!-- 게시글 목록 -->
-  <div class="post-list" id="postList"></div>
-
-  <!-- 페이지네이션 -->
-  <div class="pagination" id="pagination"></div>
+  <p class="footer-note">FOR DAYOUNG · FOREVER</p>
 </main>
 
 <script>
-  const PER_PAGE = 5;
-  let currentPage = 1;
-  let posts = JSON.parse(localStorage.getItem('bb_posts') || '[]');
+  /* 날짜 */
+  document.getElementById('letterDate').textContent =
+    new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
 
-  /* 날짜 표시 */
-  document.getElementById('dateDisplay').textContent =
-    new Date().toLocaleDateString('ko-KR', { year:'numeric', month:'long', day:'numeric', weekday:'long' });
-
-  function savePosts() {
-    localStorage.setItem('bb_posts', JSON.stringify(posts));
+  /* 떠다니는 하트 생성 */
+  const heartsEl = document.getElementById('hearts');
+  const heartChars = ['♥', '♡', '💕', '✿', '🌸'];
+  for (let i = 0; i < 18; i++) {
+    const h = document.createElement('span');
+    h.className = 'heart';
+    h.textContent = heartChars[Math.floor(Math.random() * heartChars.length)];
+    h.style.left = Math.random() * 100 + '%';
+    h.style.animationDuration = (8 + Math.random() * 12) + 's';
+    h.style.animationDelay = (Math.random() * 10) + 's';
+    h.style.fontSize = (.6 + Math.random() * .8) + 'rem';
+    heartsEl.appendChild(h);
   }
 
-  function timeAgo(isoString) {
-    const diff = (Date.now() - new Date(isoString)) / 1000;
-    if (diff < 60) return '방금 전';
-    if (diff < 3600) return `${Math.floor(diff/60)}분 전`;
-    if (diff < 86400) return `${Math.floor(diff/3600)}시간 전`;
-    if (diff < 604800) return `${Math.floor(diff/86400)}일 전`;
-    return new Date(isoString).toLocaleDateString('ko-KR');
+  /* 편지 열기 */
+  let opened = false;
+  function openLetter() {
+    if (opened) return;
+    opened = true;
+
+    const envelope = document.getElementById('envelope');
+    envelope.classList.add('open');
+
+    setTimeout(() => {
+      document.getElementById('cover').classList.add('hide');
+      document.getElementById('letter-page').classList.add('show');
+      revealLines();
+    }, 900);
   }
 
-  function submitPost() {
-    const author  = document.getElementById('inputAuthor').value.trim() || '익명';
-    const title   = document.getElementById('inputTitle').value.trim();
-    const content = document.getElementById('inputContent').value.trim();
-
-    if (!title) { alert('제목을 입력해 주세요.'); return; }
-    if (!content) { alert('내용을 입력해 주세요.'); return; }
-
-    posts.unshift({ id: Date.now(), author, title, content, date: new Date().toISOString() });
-    savePosts();
-
-    document.getElementById('inputTitle').value = '';
-    document.getElementById('inputContent').value = '';
-    currentPage = 1;
-    renderPosts();
+  /* 한 줄씩 페이드인 */
+  function revealLines() {
+    const lines = document.querySelectorAll('#letterBody p');
+    lines.forEach((line, i) => {
+      setTimeout(() => line.classList.add('visible'), 400 + i * 500);
+    });
+    const last = lines.length;
+    setTimeout(() => document.getElementById('decoFlower').classList.add('visible'), 400 + last * 500);
+    setTimeout(() => document.getElementById('letterSign').classList.add('visible'), 400 + (last + 1) * 500);
   }
-
-  function deletePost(id) {
-    if (!confirm('정말 삭제하시겠습니까?')) return;
-    posts = posts.filter(p => p.id !== id);
-    savePosts();
-    renderPosts();
-  }
-
-  function toggleBody(id) {
-    const el = document.getElementById('body-' + id);
-    el.classList.toggle('open');
-  }
-
-  function renderPosts() {
-    const query = document.getElementById('searchInput').value.trim().toLowerCase();
-    const filtered = query
-      ? posts.filter(p => p.title.toLowerCase().includes(query) || p.author.toLowerCase().includes(query))
-      : posts;
-
-    const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
-    if (currentPage > totalPages) currentPage = totalPages;
-
-    const start = (currentPage - 1) * PER_PAGE;
-    const pagePosts = filtered.slice(start, start + PER_PAGE);
-
-    document.getElementById('postCount').textContent = `총 ${filtered.length}개의 글`;
-
-    const list = document.getElementById('postList');
-    if (filtered.length === 0) {
-      list.innerHTML = '<div class="empty">등록된 게시글이 없습니다.</div>';
-    } else {
-      list.innerHTML = pagePosts.map((p, i) => `
-        <div class="post-item">
-          <div class="post-header">
-            <div>
-              <div class="post-title" onclick="toggleBody(${p.id})">${escHtml(p.title)}</div>
-              <div class="post-meta">
-                <span>✍️ ${escHtml(p.author)}</span>
-                <span>${timeAgo(p.date)}</span>
-              </div>
-            </div>
-            <button class="btn-delete" onclick="deletePost(${p.id})">삭제</button>
-          </div>
-          <div class="post-body" id="body-${p.id}">${escHtml(p.content)}</div>
-        </div>
-      `).join('');
-    }
-
-    /* 페이지네이션 */
-    const pg = document.getElementById('pagination');
-    if (totalPages <= 1) { pg.innerHTML = ''; return; }
-
-    let html = '';
-    for (let i = 1; i <= totalPages; i++) {
-      html += `<button class="${i === currentPage ? 'active' : ''}" onclick="goPage(${i})">${i}</button>`;
-    }
-    pg.innerHTML = html;
-  }
-
-  function goPage(n) {
-    currentPage = n;
-    renderPosts();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  function escHtml(str) {
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  }
-
-  /* 초기 샘플 데이터 */
-  if (posts.length === 0) {
-    posts = [
-      { id: 3, author: '관리자', title: '게시판 이용 안내', content: '자유롭게 글을 작성하실 수 있습니다.\n욕설 및 비방 글은 삭제될 수 있습니다.', date: new Date(Date.now() - 3600000).toISOString() },
-      { id: 2, author: '홍길동', title: '안녕하세요 반갑습니다!', content: '처음 방문했는데 게시판이 깔끔하네요 👍', date: new Date(Date.now() - 7200000).toISOString() },
-      { id: 1, author: '테스터', title: '테스트 글입니다', content: '이 글은 샘플 글입니다. 삭제해도 됩니다.', date: new Date(Date.now() - 86400000).toISOString() },
-    ];
-    savePosts();
-  }
-
-  renderPosts();
 </script>
 
 </body>
