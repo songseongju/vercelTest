@@ -1,7 +1,7 @@
 'use strict';
 const cache=new WeakMap();
 async function health(store){
-  const base={version:'3.1.0',storage:store?.kind||(store?'local':'missing')};
+  const base={version:require('../package.json').version,storage:store?.kind||(store?'local':'missing')};
   if(!store)return{...base,ok:false,message:'Redis를 연결해 주세요. REDIS_URL(레디스 클라우드) 또는 Upstash REST URL·토큰을 설정한 뒤 다시 배포해야 합니다.'};
   if(typeof store.command!=='function')return{...base,ok:true};
   const previous=cache.get(store);if(previous&&Date.now()-previous.at<15000)return previous.result;

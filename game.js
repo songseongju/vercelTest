@@ -2,7 +2,7 @@
 (() => {
 const $=id=>document.getElementById(id),canvas=$('world'),start=$('start'),R=window.BattleRules,controls=window.GameControls,boot=window.GameBoot,W=window.BattleWorld;
 function startupFailure(message,error){$('error').textContent=message;boot?.fail(message,error?.message||'')}
-if(!window.BABYLON||!R||!controls||!window.createLootVisuals||!W){startupFailure('게임 파일을 불러오지 못했습니다. 페이지를 새로고침해 주세요.');return}
+if(!window.BABYLON||!R||!controls||!window.createLootVisuals||!window.createFirstPersonRig||!W){startupFailure('게임 파일을 불러오지 못했습니다. 페이지를 새로고침해 주세요.');return}
 const B=BABYLON,V=B.Vector3,C=B.Color3;const mobileDevice=matchMedia('(pointer:coarse)').matches||(navigator.maxTouchPoints||0)>0;let fieldEnvironment=null;const detail=!(mobileDevice||boot?.safe);let touch=controls.isTouch(),highQuality=!mobileDevice&&!boot?.safe,engine,scene;
 try{engine=new B.Engine(canvas,highQuality,{stencil:false,powerPreference:mobileDevice?'default':'high-performance'});scene=new B.Scene(engine)}catch(error){startupFailure('3D 화면을 시작할 수 없습니다. 실행 진단에서 3D 기능을 확인해 주세요.',error);return}
 function quality(){const dpr=Math.min(window.devicePixelRatio||1,highQuality?(mobileDevice?1.25:2):1);scene.shadowsEnabled=highQuality;fieldEnvironment?.quality(highQuality);engine.setHardwareScalingLevel(1/dpr);$('quality').textContent=highQuality?'화질: 선명':'화질: 성능';engine.resize()}
@@ -330,7 +330,8 @@ const zoneMat=new B.StandardMaterial('blue field',scene);zoneMat.diffuseColor=ne
 const wall=B.MeshBuilder.CreateCylinder('zone wall',{diameter:2,height:22,tessellation:96,cap:B.Mesh.NO_CAP,sideOrientation:B.Mesh.DOUBLESIDE},scene);wall.position.y=11;wall.material=zoneMat;wall.isPickable=false;
 function ring(name,color){const points=[];for(let i=0;i<=128;i++){const a=i/128*Math.PI*2;points.push(new V(Math.sin(a),.075,Math.cos(a)))}const m=B.MeshBuilder.CreateLines(name,{points},scene);m.color=color;m.isPickable=false;return m}
 const zoneRing=ring('current circle',new C(.15,.55,1)),nextRing=ring('next circle',new C(1,1,.92));
-function blocked(x,z,r=.4){if(Math.abs(x)>W.EDGE-r||Math.abs(z)>W.EDGE-r)return true;return obstacles.some(o=>Math.abs(x-o.x)<o.w+r&&Math.abs(z-o.z)<o.d+r)}
+// Use the same map boundary and solid geometry as the online simulation.
+function blocked(x,z,r=.4){return W.blocked(x,z,r)}
 function advance(p,dx,dz,r=.4){if(!blocked(p.x+dx,p.z,r))p.x+=dx;if(!blocked(p.x,p.z+dz,r))p.z+=dz}
 function visible(a,b){const delta=b.subtract(a),length=delta.length();if(length<.01)return true;const ray=new B.Ray(a,delta.scale(1/length),Math.max(0,length-.2));return !scene.pickWithRay(ray,m=>staticHits.has(m))?.hit}
 // A* on a shared collision grid keeps bots out of walls and sends them through doors.
@@ -429,32 +430,8 @@ function throwItem(kind){
   launch(kind,camera.position.x,camera.position.z,yaw,pitch-.12,'player',21);
   beep(250,.09,.05,'square');ui();
 }
-const gun=new B.TransformNode('view weapon',scene);gun.parent=camera;gun.position.set(.23,-.23,.48);
-function gunPart(name,x,y,z,w,h,d,m){const b=box(name,x,y,z,w,h,d,m,false,false);b.parent=gun;b.renderingGroupId=1;return b}
-gunPart('receiver',0,0,.12,.12,.12,.39,M.dark);gunPart('rail',0,.076,.12,.085,.018,.38,M.steel);const barrel=gunPart('barrel',0,.01,.56,.035,.035,.35,M.dark);gunPart('grip',0,-.12,-.01,.075,.2,.09,M.dark);const mag=gunPart('magazine',0,-.11,.14,.09,.21,.12,M.steel);gunPart('stock',0,-.02,-.2,.09,.11,.24,M.dark);gunPart('handguard',0,0,.37,.1,.1,.21,M.steel);gunPart('sight left',-.025,.1,.04,.014,.05,.025,M.dark);gunPart('sight right',.025,.1,.04,.014,.05,.025,M.dark);gunPart('front sight',0,.082,.5,.013,.055,.02,M.dark);gunPart('right glove',.02,-.12,-.1,.12,.12,.13,M.pants);gunPart('left glove',-.03,-.08,.33,.12,.13,.13,M.pants);const scope=gunPart('scope',0,.11,.18,.09,.09,.28,M.dark);scope.setEnabled(false);
-const hands=new B.TransformNode('view hands',scene);hands.parent=camera;hands.position.set(0,-.34,.58);
-function handPart(parent,name,x,y,z,w,h,d,m){const b=box(name,x,y,z,w,h,d,m,false,false);b.parent=parent;b.renderingGroupId=1;return b}
-// A closed fist built from forearm, wrist, palm, four knuckles and a thumb laid across the fingers.
-function buildArm(side){
-  const arm=new B.TransformNode(side>0?'right arm':'left arm',scene);arm.parent=hands;
-  handPart(arm,'sleeve',0,-.015,-.2,.108,.105,.3,M.cloth);
-  handPart(arm,'cuff',0,-.01,-.055,.1,.098,.035,M.pants);
-  handPart(arm,'wrist',0,0,-.015,.083,.08,.07,M.skin);
-  handPart(arm,'palm',0,.004,.045,.094,.1,.095,M.skin);
-  handPart(arm,'curled fingers',0,-.012,.094,.09,.078,.05,M.skin);
-  for(let i=0;i<4;i++)handPart(arm,'knuckle',(i-1.5)*.023,.042,.088,.021,.028,.05,M.skin);
-  handPart(arm,'thumb',-side*.046,-.018,.052,.03,.034,.075,M.skin);
-  handPart(arm,'thumb tip',-side*.036,-.016,.092,.028,.03,.03,M.skin);
-  return arm;
-}
-const rightArm=buildArm(1),leftArm=buildArm(-1);
-// A drawn blade rides in the right hand and sweeps through an arc instead of jabbing.
-const bladeView=new B.TransformNode('view blade',scene);bladeView.parent=rightArm;bladeView.position.set(0,.02,.06);
-const bladeSteel=handPart(bladeView,'view blade steel',0,0,.26,.055,.013,.42,M.blade);
-const bladeEdge=handPart(bladeView,'view cutting edge',.022,0,.26,.02,.02,.4,M.blade);bladeEdge.rotation.z=.5;
-handPart(bladeView,'view cross guard',0,0,.055,.105,.03,.03,M.dark);
-handPart(bladeView,'view grip wrap',0,-.002,-.02,.05,.05,.13,M.grip);
-bladeView.setEnabled(false);hands.setEnabled(false);
+const viewRig=window.createFirstPersonRig(B,scene,camera,M,fieldEnvironment);fieldEnvironment.quality(highQuality);
+const {gun,hands,rightArm,leftArm,bladeView,bladeSteel,bladeEdge,barrel,mag,scope,muzzle}=viewRig;
 let punchTimer=0,punchSide=1,punchSpan=.34,shake=0,throwTimer=0;
 let outro=null;const netNades=new Map();
 function swingHands(){const w=R.weapons[player.equipped];punchSpan=Math.max(.2,(w?.interval||.44)*.85);punchTimer=punchSpan;punchSide=R.innate(player.equipped)?-punchSide:1}
@@ -474,14 +451,6 @@ function poseHands(moving){
   }
   if(blade){bladeSteel.scaling.z=bladeEdge.scaling.z=player.equipped==='machete'?1.5:1;bladeView.rotation.set(reach*.5,-.2+reach*.4,0)}
 }
-function roundGun(name,x,y,z,radius,length,m){const mesh=B.MeshBuilder.CreateCylinder(name,{diameter:radius*2,height:length,tessellation:16},scene);mesh.parent=gun;mesh.position.set(x,y,z);mesh.rotation.x=Math.PI/2;mesh.material=m;mesh.renderingGroupId=1;mesh.isPickable=false;return mesh}
-barrel.setEnabled(false);roundGun('rifled barrel',0,.01,.57,.022,.36,M.dark);roundGun('muzzle brake',0,.01,.755,.029,.07,M.steel);
-for(let i=0;i<9;i++)gunPart('rail tooth',0,.09,-.02+i*.04,.095,.012,.015,M.dark);
-for(let i=0;i<5;i++){gunPart('handguard cooling slot',.052,.023,.29+i*.032,.005,.025,.018,M.dark);gunPart('magazine groove',.046,-.1,.1+i*.014,.006,.18,.006,M.dark)}
-roundGun('optic housing',0,.12,.19,.045,.14,M.dark).setEnabled(false);
-for(const x of [-.062,.062])for(const z of [-.025,.15,.23]){const bolt=B.MeshBuilder.CreateSphere('receiver screw',{diameter:.012,segments:8},scene);bolt.parent=gun;bolt.position.set(x,.012,z);bolt.material=M.steel;bolt.renderingGroupId=1;bolt.isPickable=false}
-const guard=B.MeshBuilder.CreateTorus('trigger guard',{diameter:.11,thickness:.012,tessellation:20},scene);guard.parent=gun;guard.position.set(0,-.093,.035);guard.rotation.z=Math.PI/2;guard.scaling.z=.7;guard.material=M.dark;guard.renderingGroupId=1;guard.isPickable=false;
-const muzzle=B.MeshBuilder.CreateSphere('flash',{diameter:.14,segments:5},scene);muzzle.parent=gun;muzzle.position.set(0,.01,.77);muzzle.material=M.flash;muzzle.renderingGroupId=1;muzzle.isPickable=false;muzzle.setEnabled(false);gun.setEnabled(false);
 const pressed=action=>keys.has(controls.code(action));
 let player=R.newPlayer(),state='ready',time=0,clock=0,zone=R.zoneAt(0),yaw=0,pitch=0,reloading=0,healing=0,shotTimer=0,recoil=0,hitTimer=0,damageFade=0,noticeTimer=0,feedTimer=0,held=false,ads=false,nearest=null,step=0,hudTimer=0;
 const keys=new Set(),move={x:0,y:0};let audio=null,soundOn=true,dragLook=null;const pointers={stick:null,look:null,fire:null};
@@ -496,7 +465,7 @@ function clearInput(){keys.clear();held=ads=false;move.x=move.y=0;dragLook=null;
 function lock(){if(touch||document.pointerLockElement===canvas)return;try{const p=canvas.requestPointerLock?.();p?.catch?.(()=>notify('마우스를 누른 채 드래그해 조준할 수도 있습니다',4))}catch{}}
 function format(t){const seconds=Math.max(0,Math.ceil(t));return String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0')}
 function thirdView(){return thirdPerson&&!ads&&(state==='playing'||state==='finished')}
-function updateGun(){const melee=R.melee(player.equipped),first=!thirdView();gun.setEnabled(first&&!!player.equipped&&!melee);hands.setEnabled(first&&melee);bladeView.setEnabled(melee&&!R.innate(player.equipped));scope.setEnabled(!melee&&player.equipped==='marksman');barrel.scaling.z=player.equipped==='marksman'?1.6:player.equipped==='smg'?.6:1;mag.scaling.y=player.equipped==='marksman'?.6:1;muzzle.position.z=player.equipped==='marksman'?.88:.77}
+function updateGun(){const melee=R.melee(player.equipped),first=!thirdView();gun.setEnabled(first&&!!player.equipped&&!melee);hands.setEnabled(first&&melee);bladeView.setEnabled(melee&&!R.innate(player.equipped));viewRig.equip(player.equipped)}
 function ensureSelfBody(){if(selfBody||!soldierAssets)return;selfBody=makeSoldier('self',0,0);selfBody.bodyHit.isPickable=false;selfBody.headHit.isPickable=false;selfBody.root.setEnabled(false)}
 function dropSelfBody(){if(!selfBody)return;disposeSoldier(selfBody);selfBody=null}
 // Pull straight out along the view axis, then swing to the shoulder, stopping short of any wall behind.
@@ -726,10 +695,10 @@ shotTimer=Math.max(0,shotTimer-dt);punchTimer=Math.max(0,punchTimer-dt);throwTim
 if(player.blind>0)player.blind=Math.max(0,player.blind-dt);$('flashwash').style.opacity=String(Math.min(1,(player.blind||0)/1.6));
 if(reloading>0){reloading-=dt;if(reloading<=0){reloading=0;R.reload(player);beep(420,.06,.04,'square');ui()}}
 if(healing>0){healing-=dt;if(healing<=0){healing=0;R.heal(player);beep(650,.15,.06);ui()}}
-let mx=(pressed('right')?1:0)-(pressed('left')?1:0)+move.x,mz=(pressed('forward')?1:0)-(pressed('back')?1:0)-move.y,length=Math.hypot(mx,mz);if(length>1){mx/=length;mz/=length}const speed=healing?1.8:ads?2.7:pressed('sprint')?7:4.8;advance(camera.position,(mx*Math.cos(yaw)+mz*Math.sin(yaw))*speed*dt,(-mx*Math.sin(yaw)+mz*Math.cos(yaw))*speed*dt);if(length>.1)step+=dt*10;camera.position.y=1.7+(length>.1?Math.sin(step)*.02:0);followSun(camera.position);camera.rotation.set(pitch-recoil*.2,yaw,0);if(shake>0){camera.rotation.x+=(Math.random()-.5)*shake;camera.rotation.y+=(Math.random()-.5)*shake;camera.rotation.z=(Math.random()-.5)*shake*.7;shake=Math.max(0,shake-dt*1.7);if(!shake)camera.rotation.z=0}camera.fov+=((ads&&!R.melee(player.equipped)?(player.equipped==='marksman'?.45:.7):1.08)-camera.fov)*Math.min(1,dt*12);gun.position.x+=( (ads?0:.23)-gun.position.x)*Math.min(1,dt*12);gun.position.y=-.23+(length>.1?Math.sin(step)*.009:0)-(reloading||healing?.16:0);gun.position.z=.48-recoil;gun.rotation.x=reloading?-.45:0;poseHands(length>.1);placeView(length>.1);
+let mx=(pressed('right')?1:0)-(pressed('left')?1:0)+move.x,mz=(pressed('forward')?1:0)-(pressed('back')?1:0)-move.y,length=Math.hypot(mx,mz);if(length>1){mx/=length;mz/=length}const speed=healing?1.8:ads?2.7:pressed('sprint')?7:4.8;advance(camera.position,(mx*Math.cos(yaw)+mz*Math.sin(yaw))*speed*dt,(-mx*Math.sin(yaw)+mz*Math.cos(yaw))*speed*dt);if(length>.1)step+=dt*10;camera.position.y=1.7+(length>.1?Math.sin(step)*.02:0);followSun(camera.position);camera.rotation.set(pitch-recoil*.2,yaw,0);if(shake>0){camera.rotation.x+=(Math.random()-.5)*shake;camera.rotation.y+=(Math.random()-.5)*shake;camera.rotation.z=(Math.random()-.5)*shake*.7;shake=Math.max(0,shake-dt*1.7);if(!shake)camera.rotation.z=0}camera.fov+=((ads&&!R.melee(player.equipped)?(player.equipped==='marksman'?.45:.7):1.08)-camera.fov)*Math.min(1,dt*12);viewRig.pose({dt,moving:length>.1,step,time,yaw,pitch,ads,recoil,reloading,healing});poseHands(length>.1);placeView(length>.1);
 if(held)shoot();updateGrenades(dt);if(state!=='playing')return;updateBots(dt);for(let i=corpses.length-1;i>=0;i--){const c=corpses[i];c.age+=dt;c.e.root.rotation.x=-Math.min(1,c.age/.45)*Math.PI/2;if(c.age>5){disposeSoldier(c.e);corpses.splice(i,1)}}stepEffects(dt);hudTimer-=dt;if(hudTimer<=0){searchLoot();ui();hudTimer=.12}}
 const keyActions={collect,reload,heal,swap,view:toggleView,fists:()=>equip('fists'),melee:equipMelee,gun:equipGun,flash:()=>throwItem('flash'),frag:()=>throwItem('frag')};
-addEventListener('keydown',e=>{if(controls.modalOpen||controls.editing||window.GameOnline?.modalOpen)return;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();if(e.repeat)return;keys.add(e.code);if(e.code==='Escape'){pause();return}keyActions[controls.actionFor(e.code)]?.()});addEventListener('keyup',e=>keys.delete(e.code));
+addEventListener('keydown',e=>{if(controls.modalOpen||controls.editing||window.GameOnline?.modalOpen)return;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat)return;if(e.code==='Escape'){pause();return}keyActions[controls.actionFor(e.code)]?.()});addEventListener('keyup',e=>keys.delete(e.code));
 canvas.addEventListener('pointerdown',e=>{if(state!=='playing'||touch)return;if(e.button===2){ads=true;return}if(e.button!==0)return;held=true;if(netMode)netShot();dragLook={x:e.clientX,y:e.clientY};lock()});addEventListener('pointerup',e=>{if(touch)return;if(e.button===2)ads=false;if(e.button===0){held=false;dragLook=null}});canvas.addEventListener('pointercancel',clearInput);canvas.addEventListener('contextmenu',e=>e.preventDefault());addEventListener('mousemove',e=>{if(state!=='playing'||touch)return;const sensitivity=ads?.0013:.0024;if(document.pointerLockElement===canvas){yaw+=e.movementX*sensitivity;pitch+=e.movementY*sensitivity}else if(dragLook){yaw+=(e.clientX-dragLook.x)*.004;pitch+=(e.clientY-dragLook.y)*.004;dragLook={x:e.clientX,y:e.clientY}}pitch=Math.max(-1.25,Math.min(1.25,pitch))});document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement&&state==='playing'&&!touch)pause()});addEventListener('blur',pause);document.addEventListener('visibilitychange',()=>{if(document.hidden)pause()});
 function pad(node,type,down,onMove,up){node.addEventListener('pointerdown',e=>{if(state!=='playing'||pointers[type]!==null)return;e.preventDefault();pointers[type]=e.pointerId;controls.capturePointer(node,e.pointerId);down(e)});addEventListener('pointermove',e=>{if(pointers[type]===e.pointerId)onMove(e)});for(const n of ['pointerup','pointercancel','lostpointercapture'])addEventListener(n,e=>{if(pointers[type]===e.pointerId){pointers[type]=null;up()}})}
 let stickOrigin={x:0,y:0},lookOrigin={x:0,y:0};function stickMove(e){let x=e.clientX-stickOrigin.x,y=e.clientY-stickOrigin.y,d=Math.hypot(x,y),s=d>36?36/d:1;x*=s;y*=s;move.x=x/36;move.y=y/36;$('knob').style.transform=`translate(${x}px,${y}px)`}
@@ -770,7 +739,7 @@ function netTick(dt){
   if(state==='playing'&&netConnected){let mx=(pressed('right')?1:0)-(pressed('left')?1:0)+move.x,mz=(pressed('forward')?1:0)-(pressed('back')?1:0)-move.y;const len=Math.hypot(mx,mz);if(len>1){mx/=len;mz/=len}netMoving=len>.1;const speed=healing?1.8:ads?2.7:pressed('sprint')?7:4.8;W.move(camera.position,(mx*Math.cos(yaw)+mz*Math.sin(yaw))*speed*dt,(-mx*Math.sin(yaw)+mz*Math.cos(yaw))*speed*dt);if(held)netShot();}
   if(netTarget&&netState?.phase==='playing'){const d=Math.hypot(camera.position.x-netTarget.x,camera.position.z-netTarget.z);const factor=d>2?1:Math.min(1,dt*5);camera.position.x+=(netTarget.x-camera.position.x)*factor;camera.position.z+=(netTarget.z-camera.position.z)*factor;}
   followSun(camera.position);
-  if(netState?.phase==='playing'||netState?.phase==='finished'){camera.position.y=1.7;camera.rotation.set(pitch-recoil*.2,yaw,0);camera.fov+=((ads&&!R.melee(player.equipped)?(player.equipped==='marksman'?.45:.7):1.08)-camera.fov)*Math.min(1,dt*12);gun.position.x+=((ads?0:.23)-gun.position.x)*Math.min(1,dt*12);gun.position.y=-.23-(reloading||healing?.16:0);gun.position.z=.48-recoil;gun.rotation.x=reloading?-.45:0;poseHands(netMoving);placeView(netMoving);$('zonewash').style.opacity=R.outsideZone(camera.position.x,camera.position.z,zone)?'.9':'0';}
+  if(netState?.phase==='playing'||netState?.phase==='finished'){camera.position.y=1.7;camera.rotation.set(pitch-recoil*.2,yaw,0);camera.fov+=((ads&&!R.melee(player.equipped)?(player.equipped==='marksman'?.45:.7):1.08)-camera.fov)*Math.min(1,dt*12);if(netMoving)step+=dt*10;viewRig.pose({dt,moving:netMoving,step,time,yaw,pitch,ads,recoil,reloading,healing});poseHands(netMoving);placeView(netMoving);$('zonewash').style.opacity=R.outsideZone(camera.position.x,camera.position.z,zone)?'.9':'0';}
   netSendTime-=dt;if(netSendTime<=0){netSendTime=.1;if(netConnected&&netState?.phase==='playing')netSend(state!=='playing')}
   stepEffects(dt);
 }

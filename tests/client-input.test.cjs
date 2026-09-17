@@ -11,7 +11,7 @@ const sandbox={console,Math,Map,Set,Float32Array,Int16Array,Uint8Array,performan
 const BOTS=23;
 test('client gameplay survives pointer-lock shooting and mobile controls',async()=>{sandbox.window.createFieldEnvironment=()=>({materials:{},quality:noop,mapBox:noop,tree:noop,surface:()=>new B.StandardMaterial('fixture')});const BINDINGS={collect:'KeyF',reload:'KeyR',heal:'Digit4',flash:'Digit5',frag:'Digit6',swap:'KeyQ',view:'KeyV',fists:'Digit1',melee:'Digit2',gun:'Digit3',forward:'KeyW',back:'KeyS',left:'KeyA',right:'KeyD',sprint:'ShiftLeft'};
 const KEYLABEL=code=>code.startsWith('Key')?code.slice(3):code.startsWith('Digit')?code.slice(5):code;
-sandbox.window.GameControls={isTouch:()=>true,keyLabel:a=>KEYLABEL(BINDINGS[a]||''),code:a=>BINDINGS[a],actionFor:code=>Object.keys(BINDINGS).find(a=>BINDINGS[a]===code)||null,connect:hooks=>hooks.changed()};vm.createContext(sandbox);vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../loot-visuals.js'),'utf8'),sandbox);let src=fs.readFileSync(require('node:path').join(__dirname,'../game.js'),'utf8');src=src.replace('loadCharacters();','globalThis.characterLoading=loadCharacters();').replace(/\}\)\(\);\s*$/,'globalThis.api={run:code=>eval(code)};})();');vm.runInContext(src,sandbox);await sandbox.characterLoading;const run=sandbox.api.run;assert.equal(run('charactersReady'),true);assert.equal(run('highQuality'),false);assert.equal(run('scene.shadowsEnabled'),false);assert.equal(run('engine.getHardwareScalingLevel()'),1);run('resetRound();scene.render()');assert.equal(run('enemies.length'),BOTS);assert.ok(run('enemies.every(e=>e.rig.Head&&e.rig.RightHand&&e.rig.LeftHand)'));assert.equal(run('new Set(enemies.map(e=>e.skeletons[0])).size'),BOTS,'independent skeletons');assert.equal(run('Object.keys(enemies[0].animations).length'),3);
+sandbox.window.GameControls={isTouch:()=>true,keyLabel:a=>KEYLABEL(BINDINGS[a]||''),code:a=>BINDINGS[a],actionFor:code=>Object.keys(BINDINGS).find(a=>BINDINGS[a]===code)||null,connect:hooks=>hooks.changed()};vm.createContext(sandbox);vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../loot-visuals.js'),'utf8'),sandbox);vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../viewmodel.js'),'utf8'),sandbox);let src=fs.readFileSync(require('node:path').join(__dirname,'../game.js'),'utf8');src=src.replace('loadCharacters();','globalThis.characterLoading=loadCharacters();').replace(/\}\)\(\);\s*$/,'globalThis.api={run:code=>eval(code)};})();');vm.runInContext(src,sandbox);await sandbox.characterLoading;const run=sandbox.api.run;assert.equal(run('charactersReady'),true);assert.equal(run('highQuality'),false);assert.equal(run('scene.shadowsEnabled'),false);assert.equal(run('engine.getHardwareScalingLevel()'),1);run('resetRound();scene.render()');assert.equal(run('enemies.length'),BOTS);assert.ok(run('enemies.every(e=>e.rig.Head&&e.rig.RightHand&&e.rig.LeftHand)'));assert.equal(run('new Set(enemies.map(e=>e.skeletons[0])).size'),BOTS,'independent skeletons');assert.equal(run('Object.keys(enemies[0].animations).length'),3);
 assert.equal(run("player.equipped"),'fists','everyone starts bare-handed');
 // Bare hands must fight: swing at a bot standing within arm's reach.
 run('enemies[0].root.position.set(0,0,-50);enemies[0].hp=100;enemies[0].armor=0;camera.position.set(0,1.7,-51.6);yaw=0;pitch=0;camera.rotation.set(0,0,0);shotTimer=0;scene.render();shoot()');
@@ -67,10 +67,31 @@ run('state="playing";ads=false;const eye=camera.position.clone();toggleView();pl
 run('resetRound();scene.render()');
 assert.ok(run('Math.hypot(camera.position.x,camera.position.z)>80'),'players drop on the outer ring');
 assert.equal(run('blocked(camera.position.x,camera.position.z,.4)'),false,'the drop point is walkable');
+for(const[x,z]of sandbox.window.BattleWorld.spawns)assert.equal(run(`blocked(${x},${z},.4)`),false,'every spawn uses shared collision bounds');
 run('touch=false;move.x=move.y=0;globalThis.from=camera.position.clone();keys.add(controls.code("forward"));for(let i=0;i<14;i++)tick(.05);keys.delete(controls.code("forward"))');
 assert.ok(run('V.Distance(from,camera.position)')>2,'holding forward has to actually move the player');
 run('globalThis.side=camera.position.clone();keys.add(controls.code("right"));for(let i=0;i<10;i++)tick(.05);keys.clear()');
 assert.ok(run('V.Distance(side,camera.position)')>1,'strafing works from the bound key too');
+// Test actual input handlers: repeat key events must restore held movement after a reset.
+run('resetRound();globalThis.inputStart=camera.position.clone();touch=false');
+const press={code:'KeyW',repeat:false,preventDefault(){}};
+for(const fn of listeners.keydown)fn(press);
+run('for(let i=0;i<8;i++)tick(.05)');
+assert.ok(run('V.Distance(inputStart,camera.position)>1'),'keydown moves the character');
+run('clearInput();globalThis.inputStart=camera.position.clone()');
+for(const fn of listeners.keydown)fn({...press,repeat:true});
+run('for(let i=0;i<8;i++)tick(.05)');
+assert.ok(run('V.Distance(inputStart,camera.position)>1'),'holding a key recovers after input reset');
+for(const fn of listeners.keyup)fn(press);
+assert.equal(run('pressed("forward")'),false,'releasing W stops movement');
+// Mobile pad uses the very same walkable spawn and collision rules.
+run('resetRound();touch=true;globalThis.padStart=camera.position.clone()');
+sandbox.window.GameControls.capturePointer=()=>false;
+element('stick').events.pointerdown({pointerId:8,clientX:50,clientY:14,preventDefault(){}});
+run('for(let i=0;i<8;i++)tick(.05)');
+assert.ok(run('V.Distance(padStart,camera.position)>1'),'touch stick moves away from spawn');
+for(const fn of listeners.pointerup)fn({pointerId:8});
+assert.equal(run('move.y'),0,'releasing the stick stops movement');
 // Worn armour hangs off the skeleton now, facing the way the soldier faces.
 run("player.helmet=100;player.vest=100;state='playing';ads=false;thirdPerson=false;toggleView();placeView(false);scene.render()");
 assert.equal(run('selfBody.gearHelmet.isEnabled()'),true);
