@@ -439,7 +439,7 @@ function swingHands(){const w=R.weapons[player.equipped];punchSpan=Math.max(.2,(
 function poseHands(moving){
   if(!hands.isEnabled())return;
   const blade=bladeView.isEnabled(),bob=moving?Math.sin(step)*.01:0;
-  hands.position.y=-.34+bob-(healing?.16:0);hands.position.z=.58;
+  hands.position.y=-.27+bob-(healing?.16:0);hands.position.z=.58;
   // A real punch cocks back before it lands, so the curve dips negative first.
   const phase=punchTimer>0?1-punchTimer/punchSpan:0;
   const reach=punchTimer<=0?0:phase<.24?-Math.sin(phase/.24*Math.PI)*.28:Math.sin((phase-.24)/.76*Math.PI);

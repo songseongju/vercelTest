@@ -7,13 +7,15 @@ window.createFirstPersonRig=function(B,scene,camera,M,environment){
   const fabric=environment.surface('view woven combat sleeve','gear/kevlar',.4,'#697260',0,.93,2);
   const leather=environment.surface('view glove leather','gear/leather',.15,'#383b36',0,.86,1.7);
   const rubber=material('view matte rubber','#1d2425',0,.85),seam=material('view stitching','#737467',0,.95);
-  const alloy=material('view anodized receiver','#343e43',.75,.32),edge=material('view exposed machined edges','#7f8b90',.85,.26);
+  const alloy=environment.surface('view anodized receiver','gear/plate',.4,'#343e43',.75,.48,2);
+  alloy.albedoTexture=null;alloy.albedoColor=C.FromHexString('#343e43').toLinearSpace();
+  const edge=material('view exposed machined edges','#7f8b90',.85,.26);
   const tan=material('view ceramic handguard','#827b61',.25,.53),black=material('view recess','#080e12',.05,.78);
   const glass=material('view coated optic lens','#267f86',.65,.12);glass.emissiveColor=new C(.008,.045,.047);
   function node(name,parent){const n=new B.TransformNode(name,scene);if(parent)n.parent=parent;return n}
   function finish(mesh,parent,m){mesh.parent=parent;mesh.material=m;mesh.renderingGroupId=1;mesh.isPickable=false;mesh.receiveShadows=false;return mesh}
   function ellipsoid(parent,name,x,y,z,w,h,d,m){const mesh=B.MeshBuilder.CreateSphere(name,{diameter:1,segments:8},scene);mesh.scaling.set(w,h,d);mesh.position.set(x,y,z);return finish(mesh,parent,m)}
-  function tube(parent,name,points,r,m){return finish(B.MeshBuilder.CreateTube(name,{path:points.map(p=>new V(...p)),radius:r,tessellation:8,cap:B.Mesh.CAP_ALL},scene),parent,m)}
+  function tube(parent,name,points,r,m,cap=B.Mesh.CAP_ALL,tessellation=8){return finish(B.MeshBuilder.CreateTube(name,{path:points.map(p=>new V(...p)),radius:r,tessellation,cap},scene),parent,m)}
   // Elliptical rings give sleeves a tapered silhouette and actual fabric folds, not box corners.
   function loft(parent,name,rings,m,sides=24){
     const p=[],uv=[],idx=[],normals=[];
@@ -99,11 +101,11 @@ window.createFirstPersonRig=function(B,scene,camera,M,environment){
   for(const s of [-1,1])for(let i=0;i<3;i++)ellipsoid(barrel,'compensator port',s*.023,.008,.251+i*.017,.004,.015,.008,black);
   batch(barrel);barrel.position.z=.48;
   const scope=node('magnified optic',gun);
-  cylinder(scope,'scope tube',0,.122,.034,.029,.23,alloy);cylinder(scope,'ocular housing',0,.122,-.094,.038,.068,alloy);
-  cylinder(scope,'objective housing',0,.122,.17,.044,.065,alloy);cylinder(scope,'ocular lens',0,.122,-.129,.031,.001,glass);
+  tube(scope,'scope tube',[[0,.122,-.081],[0,.122,.149]],.029,alloy,B.Mesh.NO_CAP,24);tube(scope,'ocular housing',[[0,.122,-.128],[0,.122,-.06]],.038,alloy,B.Mesh.NO_CAP,24);
+  tube(scope,'objective housing',[[0,.122,.1375],[0,.122,.2025]],.044,alloy,B.Mesh.NO_CAP,24);const lens=cylinder(scope,'ocular lens',0,.122,-.129,.031,.001,glass);
   ring(scope,'ocular ring',0,.122,-.13,.071,.006,edge);
   cylinder(scope,'elevation turret',0,.162,.04,.021,.025,rubber,'y');cylinder(scope,'windage turret',.037,.122,.04,.018,.026,rubber,'x');
-  for(const z of [-.038,.095]){ring(scope,'optic clamp',0,.122,z,.063,.008,tan);profile(scope,'optic mount',[[.07,z-.013],[.099,z-.013],[.099,z+.013],[.07,z+.013]],.067,alloy,.003)}batch(scope);
+  for(const z of [-.038,.095]){ring(scope,'optic clamp',0,.122,z,.063,.008,tan);profile(scope,'optic mount',[[.07,z-.013],[.099,z-.013],[.099,z+.013],[.07,z+.013]],.067,alloy,.003)}
   const rear=node('rear iron sight',gun);
   tube(rear,'rear aperture frame',[[-.029,.076,-.102],[-.029,.103,-.102],[0,.112,-.102],[.029,.103,-.102],[.029,.076,-.102]],.004,alloy);
   ring(rear,'rear aperture',0,.106,-.102,.018,.004,alloy);batch(rear);
@@ -113,19 +115,20 @@ window.createFirstPersonRig=function(B,scene,camera,M,environment){
   const gunRight=arm(null,1,'trigger hand');gunRight.parent=gun;gunRight.position.set(.012,-.138,-.056);gunRight.rotation.set(-.8,.1,-.17);
   const gunLeft=arm(null,-1,'support hand');gunLeft.parent=gun;gunLeft.position.set(-.045,-.082,.345);gunLeft.rotation.set(-.28,-.65,.85);
   const muzzle=ellipsoid(gun,'flash',0,.008,.81,.1,.09,.24,M.flash);muzzle.setEnabled(false);
-  gun.parent=hands.parent=camera;gun.position.set(.23,-.23,.48);hands.position.set(0,-.34,.58);gun.setEnabled(false);hands.setEnabled(false);bladeView.setEnabled(false);scope.setEnabled(false);
+  gun.parent=hands.parent=camera;gun.position.set(.23,-.23,.48);hands.position.set(0,-.27,.58);gun.setEnabled(false);hands.setEnabled(false);bladeView.setEnabled(false);scope.setEnabled(false);
   let previousYaw=null,previousPitch=0,swayX=0,swayY=0,reloadBlend=0;
-  function equip(kind){const marksman=kind==='marksman';scope.setEnabled(marksman);rear.setEnabled(!marksman);barrel.scaling.z=marksman?1.5:kind==='smg'?.66:1;mag.scaling.y=marksman?.8:1;muzzle.position.z=.48+.33*barrel.scaling.z;}
+  function equip(kind){const marksman=kind==='marksman';scope.setEnabled(marksman);rear.setEnabled(!marksman);barrel.scaling.z=marksman?1.5:kind==='smg'?.66:1;mag.scaling.y=marksman?.8:1;muzzle.position.z=.48+.32*barrel.scaling.z;}
   function pose({dt,moving,step,time,yaw,pitch,ads,recoil,reloading,healing}){
     const blend=1-Math.exp(-dt*12);
     if(previousYaw===null){previousYaw=yaw;previousPitch=pitch}
     const delta=Math.atan2(Math.sin(yaw-previousYaw),Math.cos(yaw-previousYaw));
     swayX+=(Math.max(-.035,Math.min(.035,-delta*.35))-swayX)*blend;swayY+=(Math.max(-.025,Math.min(.025,(pitch-previousPitch)*.3))-swayY)*blend;
     previousYaw=yaw;previousPitch=pitch;reloadBlend+=((reloading||healing?1:0)-reloadBlend)*blend;
+    lens.setEnabled(!ads);
     const bob=moving?Math.sin(step):0,breathe=Math.sin(time*1.8)*.0015,aim=ads?.16:1;
     // Sight line reaches the centre of the screen; the gameplay camera/shot ray is untouched.
     gun.position.x+=((ads?0:.23)+swayX*aim-gun.position.x)*blend;
-    gun.position.y+=((ads?-.106:-.23)+bob*.006*aim+breathe+swayY-reloadBlend*.14-gun.position.y)*blend;
+    gun.position.y+=((ads?-(scope.isEnabled()?.122:.106):-.23)+bob*.006*aim+breathe+swayY-reloadBlend*.14-gun.position.y)*blend;
     gun.position.z=.48-recoil*.65;gun.rotation.set(-recoil*.45-reloadBlend*.28,swayX*.8,-bob*.008*aim+reloadBlend*.32);
     gunLeft.position.y=-.082-reloadBlend*.14;gunLeft.position.z=.345-reloadBlend*.12;
     mag.position.y=-reloadBlend*.13;
