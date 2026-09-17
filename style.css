@@ -17,3 +17,40 @@
 #online-open{border:1px solid #efbf56;background:#efbf56;color:#192b2e;font-size:17px;font-weight:bold;min-height:54px;padding:14px 24px;margin:0 10px 10px 0}#online-open:disabled{opacity:.5}#online-open+#start{min-width:190px;background:#29434b;color:#edf4f1;font-size:15px;padding:15px 22px;box-shadow:none}#online-dialog{width:min(510px,94vw);max-height:90vh;max-height:90dvh;overflow:auto;background:#172d34;color:#edf4f1;border:1px solid #74908e;border-radius:14px;padding:25px;font:15px Arial,'Apple SD Gothic Neo',sans-serif}#online-dialog::backdrop{background:#061720ce;backdrop-filter:blur(5px)}.online-head{display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid #77918c44;padding-bottom:18px;margin-bottom:18px}.online-head small{font:10px monospace;letter-spacing:2px;color:#efbf56}.online-head h2{font-size:23px;margin:9px 0 0}#online-dialog button{border:1px solid #829a9877;background:#28434a;color:#f1f5ec;border-radius:6px;min-height:44px;padding:10px 15px;font-size:14px}#online-dialog button:disabled{opacity:.4;cursor:default}#online-dialog .online-primary{background:#efbf56;color:#1a2b2c;font-weight:bold;border-color:#efbf56}#online-dialog label{display:grid;gap:8px;color:#bfceca;font-size:13px;margin:18px 0 12px}#online-dialog input{width:100%;min-width:0;border:1px solid #77918c88;border-radius:6px;background:#0e252d;color:#fff;padding:12px;font:16px Arial,sans-serif}#online-dialog p{font-size:13px;line-height:1.7}#room-create{width:100%}.join-row{display:flex;align-items:end;gap:10px}.join-row label{flex:1}.join-row button{margin-bottom:12px;flex-shrink:0}#online-code{text-transform:uppercase;letter-spacing:3px}.code-row{display:flex;justify-content:space-between;align-items:center;gap:12px}.code-row small{display:block;color:#bccdca;font-size:12px}#room-code{font:32px monospace;letter-spacing:5px;color:#efbf56;display:block;margin:7px 0 18px}#room-count{font:12px monospace;color:#b8cdca}#room-players{list-style:none;padding:0;margin:12px 0}#room-players li{display:flex;justify-content:space-between;gap:10px;padding:12px;border-bottom:1px solid #a1b8b322;font-size:14px}#room-players li[data-host=true] b:before{content:'★ ';color:#efbf56}#room-players span{font-size:12px;color:#afd8c6}.room-actions{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 10px}#online-status{margin:15px 0;color:#efbf56;min-height:22px}#online-leave{color:#ffc4ad!important}#network-bar{position:fixed;z-index:7;left:50%;top:12px;transform:translateX(-50%);display:flex;gap:8px;align-items:center;pointer-events:none;font-size:12px}#network-hud{background:#172d34e8;border:1px solid #efbf56a0;color:#ffe0a0;border-radius:5px;padding:8px 10px;pointer-events:auto;min-height:36px}#network-ping{color:#d4e7dc;text-shadow:0 1px 4px #000}#network-status{background:#102831e8;color:#ffcd91;border-radius:5px;padding:5px}#network-status:empty,#network-ping:empty{display:none}
 @media(max-width:650px){#network-bar{top:auto;bottom:105px;max-width:95%;white-space:nowrap}#online-dialog{padding:20px}.online-head h2{font-size:20px}#room-code{font-size:28px}#online-open{font-size:15px;padding:13px 18px;min-height:48px}#online-open+#start{min-width:150px;font-size:14px;padding:14px;margin-top:0}}@media(max-height:540px){#online-open{min-height:44px;padding:11px 18px;margin-top:14px;margin-bottom:0}#online-open+#start{min-width:160px;padding:12px 18px}#network-bar{top:8px;bottom:auto;left:43%;max-width:35%}#network-ping{display:none}#online-dialog{padding:18px;max-height:94vh}.online-head{padding-bottom:12px;margin-bottom:12px}}
 .online-mode .brief,.online-mode .scene-label{display:none}
+
+/* --- v3.2: flash blindness, round cinematics, pouch bar and the two throwables --- */
+#flashwash{position:fixed;inset:0;z-index:6;pointer-events:none;background:#fff;opacity:0;transition:opacity .12s linear;mix-blend-mode:screen}
+#pouch{display:flex;gap:10px;margin-top:9px;font-size:11px;color:#dbe8e5;flex-wrap:wrap}
+#pouch .pouch{display:flex;align-items:center;gap:4px}
+#pouch i{font-style:normal;display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 3px;border:1px solid #c6d9d888;border-radius:3px;font:10px monospace;color:#ffe0a0}
+#pouch b{font:13px monospace;color:#fff}
+#slots span{min-width:66px}
+#touch #flash,#touch #frag{font-size:11px;line-height:1.15;background:#243a2ecc;border-color:#9fd28fb0;color:#dff3d6}
+#touch #flash span,#touch #frag span{display:block;font:13px monospace;color:#fff}
+#outro{position:absolute;inset:0;z-index:8;pointer-events:none;display:grid;place-items:center;overflow:hidden}
+#outro[hidden]{display:none}
+#outro.lose{background:radial-gradient(circle at 50% 52%,#3b060600 32%,#48090bb5 78%,#210305e8 100%);animation:outro-in .5s ease-out both}
+#outro.win{background:radial-gradient(circle at 50% 48%,#ffd97a1f 20%,#0d1f2799 72%,#07161ce0 100%);animation:outro-in .6s ease-out both}
+#outro-rays{position:absolute;width:190vmax;height:190vmax;opacity:0;background:conic-gradient(from 0deg,#ffd57a2e 0 5deg,transparent 5deg 22deg);}
+#outro.win #outro-rays{opacity:1;animation:outro-spin 26s linear infinite}
+#outro-card{position:relative;text-align:center;padding:0 20px;text-shadow:0 4px 22px #000a}
+#outro-tag{display:block;font:12px monospace;letter-spacing:6px;opacity:0;animation:outro-tag .7s .12s ease-out both}
+#outro.lose #outro-tag{color:#ff9d92}
+#outro.win #outro-tag{color:#ffd479}
+#outro-title{display:block;font-size:min(92px,17vw);font-weight:900;letter-spacing:-3px;line-height:1.05;margin:10px 0 6px;opacity:0}
+#outro.lose #outro-title{color:#f5e9e6;animation:outro-fall .95s .1s cubic-bezier(.2,.9,.25,1) both}
+#outro.win #outro-title{color:#ffe3a1;animation:outro-slam .75s .1s cubic-bezier(.16,1.3,.3,1) both}
+#outro-line{display:block;font-size:15px;color:#e5eeef;opacity:0;animation:outro-tag .8s .55s ease-out both}
+#outro.win #outro-card:after{content:'';position:absolute;left:50%;bottom:-22px;width:0;height:2px;background:linear-gradient(90deg,#ffd47900,#ffd479,#ffd47900);transform:translateX(-50%);animation:outro-rule .9s .5s ease-out both}
+@keyframes outro-in{from{opacity:0}to{opacity:1}}
+@keyframes outro-spin{to{transform:rotate(360deg)}}
+@keyframes outro-tag{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes outro-fall{0%{opacity:0;transform:translateY(-46px) scale(1.14);filter:blur(7px)}60%{opacity:1;filter:blur(0)}100%{opacity:1;transform:none;filter:blur(0)}}
+@keyframes outro-slam{0%{opacity:0;transform:scale(2.3);filter:blur(12px)}70%{opacity:1;filter:blur(0)}100%{opacity:1;transform:scale(1)}}
+@keyframes outro-rule{from{width:0}to{width:min(420px,72vw)}}
+@media(prefers-reduced-motion:reduce){#outro *,#outro{animation-duration:.01ms!important;animation-iteration-count:1!important}}
+.key-list{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}
+.keys .key-row button{min-width:64px}
+@media(max-width:600px){.key-list{grid-template-columns:1fr}#pouch{gap:7px;font-size:10px}#slots span{min-width:54px;font-size:10px;padding:7px 5px}}
+@media(max-height:540px){#outro-title{font-size:min(64px,13vw)}#slots span{min-width:56px}}
+#hud.cinematic header,#hud.cinematic #zoneinfo,#hud.cinematic .bottom,#hud.cinematic #mapwrap,#hud.cinematic #crosshair,#hud.cinematic #killfeed,#hud.cinematic #notice{opacity:0;transition:opacity .45s ease}

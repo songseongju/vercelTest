@@ -6,7 +6,7 @@ const random=bytes=>crypto.randomBytes(bytes).toString('hex');
 const CODE=/^[A-HJ-NP-Z2-9]{6}$/;
 function code(){const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';return Array.from({length:6},()=>alphabet[crypto.randomInt(alphabet.length)]).join('')}
 function attach(httpServer,store,{origins=[],tickMs=100}={}){
-  const wss=new WebSocketServer({noServer:true,maxPayload:2048,perMessageDeflate:false});
+  const wss=new WebSocketServer({noServer:true,maxPayload:4096,perMessageDeflate:false});
   const groups=new Map(),owner=random(16),ipBudget=new Map();let closing=false;
   const send=(ws,data)=>{if(ws.readyState===1&&ws.bufferedAmount<128000)ws.send(JSON.stringify(data))};
   const error=(ws,message)=>send(ws,{type:'error',message});
@@ -21,14 +21,14 @@ function attach(httpServer,store,{origins=[],tickMs=100}={}){
         if(message.type==='create'){id=random(8);token=random(24);for(let attempt=0;attempt<5;attempt++){room=code();if(await store.create(room,makeState(id,message.name,token,own)))break;room=null}if(!room)throw Error('방을 만들지 못했습니다. 다시 시도해 주세요.')}
         else if(message.type==='join'||message.type==='reconnect'){room=String(message.room||'').toUpperCase();if(!CODE.test(room))throw Error('초대 코드는 영문·숫자 6자리입니다.');const state=await store.read(room);if(!state)throw Error('방을 찾을 수 없습니다. 코드를 확인해 주세요.');request=random(12);
           if(message.type==='reconnect'){id=message.id;token=message.token;if(!authorize(state,id,token))throw Error('재접속 시간이 지났습니다.');if(await store.append(room,{op:'reconnect',id,hash:hash(token),owner:own,request,at:now})!==1)throw Error('방이 만료됐습니다.');}
-          else{id=random(8);token=random(24);const game=Battle.restore(state.game);if(game.phase!=='lobby'||game.players.size>=8)throw Error('이미 시작했거나 가득 찬 방입니다.');if(await store.append(room,{op:'join',id,name:message.name,hash:hash(token),owner:own,request,at:now})!==1)throw Error('입장 요청이 많습니다. 다시 시도해 주세요.');}
+          else{id=random(8);token=random(24);const game=Battle.restore(state.game);if(game.phase!=='lobby'||game.players.size>=16)throw Error('이미 시작했거나 가득 찬 방입니다.');if(await store.append(room,{op:'join',id,name:message.name,hash:hash(token),owner:own,request,at:now})!==1)throw Error('입장 요청이 많습니다. 다시 시도해 주세요.');}
         }else throw Error('먼저 방에 입장해 주세요.');
         if(ws.readyState!==1)return;joined=true;clearTimeout(deadline);ws.context={room,id,token,owner:own,request,since:now,revision:-1};group(room).clients.add(ws);if(!request)send(ws,{type:'joined',room,id,token});await cycle(room,group(room));
       }finally{busy=false}return}
       const c=ws.context;if(c.request)return;
       if(message.type==='ping'){send(ws,{type:'pong',at:message.at});await store.append(c.room,{op:'heartbeat',id:c.id,owner:c.owner,at:now});return}
       if(message.type==='input'){await store.append(c.room,{op:'input',id:c.id,owner:c.owner,data:message.data,at:now});return}
-      if(message.type==='action'&&['ready','start','rematch','collect','reload','heal','equip','shoot'].includes(message.action)){await store.append(c.room,{op:'action',id:c.id,owner:c.owner,type:message.action,data:message.data,at:now});return}
+      if(message.type==='action'&&['ready','start','rematch','collect','reload','heal','equip','shoot','throw'].includes(message.action)){await store.append(c.room,{op:'action',id:c.id,owner:c.owner,type:message.action,data:message.data,at:now});return}
       if(message.type==='leave'){await store.append(c.room,{op:'leave',id:c.id,owner:c.owner,at:now});ws.close(1000)}
     }catch(e){error(ws,e instanceof SyntaxError?'잘못된 메시지입니다.':e.message);if(!joined)ws.close(4003)}});
     ws.on('close',()=>{clearTimeout(deadline);const c=ws.context;if(c){groups.get(c.room)?.clients.delete(ws);store.append(c.room,{op:'drop',id:c.id,owner:c.owner,at:Date.now()}).catch(()=>{})}});
