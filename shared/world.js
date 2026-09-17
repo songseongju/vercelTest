@@ -18,6 +18,60 @@ function rayBox(origin,dir,o,max=Infinity){let near=0,far=max;for(const [axis,ha
 function wallDistance(origin,dir,max=Infinity){let distance=max;for(const o of colliders)distance=Math.min(distance,rayBox(origin,dir,o,distance));if(dir.y<0){const t=(.02-origin.y)/dir.y;if(t>=0)distance=Math.min(distance,t)}return distance}
 function visible(a,b){const dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,length=Math.hypot(dx,dy,dz);return length<.01||wallDistance(a,{x:dx/length,y:dy/length,z:dz/length},length)>=length-.05}
 const spawns=[[0,-52],[0,52],[-52,0],[52,0],[-38,-38],[38,38],[-38,38],[38,-38]];
-function loot(){let serial=0;const items=[],add=(type,x,z,weapon=null,amount=60)=>items.push({id:'map-'+serial++,type,x,z,weapon,amount,taken:false});add('weapon',0,-48,'carbine');add('ammo',1.1,-47.5);add('med',-1.1,-47.5);add('armor',0,-46.1);for(const[x,z,id]of [[-17,-34,'marksman'],[20,-29,'smg'],[-25,23,'carbine'],[25,32,'marksman'],[-39,-17,'smg'],[42,17,'carbine'],[-5,27,'marksman'],[5,3,'smg']]){add('weapon',x,z,id);add('ammo',x+1.3,z);add('med',x-1.3,z);add('armor',x,z+1.7)}for(const[x,z]of [[-7,-18],[9,-37],[37,-16],[-35,4],[-12,43],[12,16]])add('ammo',x,z);return items}
-return{buildings,cargos,barriers,crates,trees,colliders,spawns,blocked,move,rayBox,wallDistance,visible,loot};
+// Loot placement is randomised per round. Pass a seed for a reproducible layout.
+function rng(seed){let a=(seed>>>0)||1;return()=>{a=(a+0x6D2B79F5)>>>0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296}}
+const weaponPool=['carbine','carbine','smg','smg','marksman'];
+function randomWeapon(random=Math.random){return weaponPool[Math.min(weaponPool.length-1,Math.floor(random()*weaponPool.length))]}
+// A spot players can actually walk onto: inside the field, clear of geometry and away from every spawn.
+function freeSpot(random,cx,cz,spread,clearSpawns=13,tries=30){
+  for(let i=0;i<tries;i++){
+    const angle=random()*Math.PI*2,radius=Math.sqrt(random())*spread;
+    const x=cx+Math.sin(angle)*radius,z=cz+Math.cos(angle)*radius;
+    if(Math.abs(x)>62||Math.abs(z)>62||blocked(x,z,.8))continue;
+    if(clearSpawns&&spawns.some(([sx,sz])=>Math.hypot(x-sx,z-sz)<clearSpawns))continue;
+    return[x,z];
+  }
+  return null;
+}
+// Each player gets a guaranteed starter cache, but it is a run away and in a random direction.
+function cacheSpot(x,z,random=Math.random){
+  for(let i=0;i<40;i++){
+    const angle=random()*Math.PI*2,radius=14+random()*10;
+    const cx=x+Math.sin(angle)*radius,cz=z+Math.cos(angle)*radius;
+    if(Math.abs(cx)>60||Math.abs(cz)>60||blocked(cx,cz,1.1))continue;
+    return[cx,cz];
+  }
+  const fallback=freeSpot(random,x,z,22,0);return fallback||[x,z];
+}
+function loot(seed){
+  const random=typeof seed==='number'?rng(seed):Math.random;
+  let serial=0;const items=[];
+  const add=(type,x,z,weapon=null,amount=60)=>items.push({id:'map-'+serial++,type,x,z,weapon,amount,taken:false});
+  const hotspots=[...buildings.map(([x,z])=>[x,z,7]),...cargos.map(([x,z])=>[x,z,5.5]),[0,0,11],[-46,-44,9],[46,44,9],[-46,44,9],[46,-44,9]];
+  for(const[cx,cz,spread]of hotspots){
+    const count=2+Math.floor(random()*3);
+    for(let i=0;i<count;i++){
+      const spot=freeSpot(random,cx,cz,spread);if(!spot)continue;
+      const roll=random();
+      if(roll<.38)add('weapon',spot[0],spot[1],randomWeapon(random));
+      else if(roll<.66)add('ammo',spot[0],spot[1],null,45+Math.floor(random()*4)*15);
+      else if(roll<.85)add('med',spot[0],spot[1]);
+      else add('armor',spot[0],spot[1]);
+    }
+  }
+  for(let i=0;i<16;i++){
+    const spot=freeSpot(random,0,0,58);if(!spot)continue;
+    const roll=random();
+    if(roll<.26)add('weapon',spot[0],spot[1],randomWeapon(random));
+    else if(roll<.62)add('ammo',spot[0],spot[1],null,45+Math.floor(random()*4)*15);
+    else if(roll<.84)add('med',spot[0],spot[1]);
+    else add('armor',spot[0],spot[1]);
+  }
+  // A round is unplayable if the map is short of guns, so top up whatever the rolls missed.
+  for(let guard=0;items.filter(x=>x.type==='weapon').length<10&&guard<60;guard++){
+    const spot=freeSpot(random,0,0,58);if(spot)add('weapon',spot[0],spot[1],randomWeapon(random));
+  }
+  return items;
+}
+return{buildings,cargos,barriers,crates,trees,colliders,spawns,blocked,move,rayBox,wallDistance,visible,loot,rng,randomWeapon,freeSpot,cacheSpot};
 });
