@@ -33,10 +33,13 @@
   var files = [
     ['vendor/babylon.js', '3D 엔진 다운로드 중…'],
     ['vendor/babylonjs.loaders.min.js', '모델 로더 준비 중…'],
-    ['rules.js?v=2.2.1', '게임 규칙 준비 중…'],
-    ['loot-visuals.js?v=2.2.1', '아이템 준비 중…'],
-    ['controls.js?v=2.2.1', '모바일 조작 준비 중…'],
-    ['game.js?v=2.2.1', '전장 생성 중…']
+    ['rules.js?v=3.1', '게임 규칙 준비 중…'],
+    ['shared/world.js?v=3.1', '공유 전장 준비 중…'],
+    ['loot-visuals.js?v=3.1', '아이템 준비 중…'],
+    ['controls.js?v=3.1', '모바일 조작 준비 중…'],
+    ['online.js?v=3.1', '친구와 플레이 준비 중…'],
+    ['environment.js?v=3.1', '전장 재질과 조명 준비 중…'],
+    ['game.js?v=3.1', '전장 생성 중…']
   ];
   function load(index) {
     if (failed || index >= files.length) return;

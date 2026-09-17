@@ -1,4 +1,13 @@
 {
   "framework": null,
-  "cleanUrls": true
+  "cleanUrls": true,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/ws.js": { "maxDuration": 300 },
+    "api/health.js": { "maxDuration": 10 }
+  },
+  "headers": [
+    { "source": "/api/(.*)", "headers": [{ "key": "Cache-Control", "value": "no-store" }] }
+  ]
 }
