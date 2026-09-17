@@ -27,9 +27,10 @@ test('every round moves the starter cache and nobody spawns holding a gun',()=>{
   const seen=new Set();
   for(let round=0;round<12;round++){
     const b=game(),p=b.players.get('a');
-    assert.equal(p.equipped,'fists');assert.deepEqual(p.weapons,{});
+    assert.equal(p.equipped,'fists');assert.deepEqual(p.weapons,{});assert.equal(p.helmet,0);assert.equal(p.vest,0);
     const cache=b.loot.filter(l=>l.id.startsWith('spawn-a-'));
-    assert.equal(cache.length,4,'weapon, ammo, medkit and armour');
+    assert.equal(cache.length,5,'weapon, ammo, medkit, vest and helmet');
+    assert.deepEqual(cache.map(l=>l.type).sort(),['ammo','helmet','med','vest','weapon']);
     const weapon=cache.find(l=>l.type==='weapon');
     const reach=Math.hypot(weapon.x-p.x,weapon.z-p.z);
     assert.ok(reach>12&&reach<27,'the cache is a run away, not underfoot: '+reach.toFixed(1));
@@ -68,4 +69,50 @@ test('picking up a gun takes it out of bare hands and death returns it to the ma
   assert.equal(b.action('a','equip',cache.weapon),true);
   b.kill(a,null,'테스트');
   assert.ok(b.loot.some(l=>l.id.startsWith('drop-')&&l.type==='weapon'&&l.weapon===cache.weapon),'the gun drops, the fists do not');
+});
+
+test('a helmet stops head shots and a vest stops body shots, each wearing down on its own',()=>{
+  const b=game(),a=b.players.get('a'),c=b.players.get('b');
+  c.helmet=100;c.vest=100;c.hp=100;
+  a.x=0;a.z=0;a.yaw=0;a.pitch=0;c.x=0;c.z=1.5;
+  b.shoot(a);                                   // fists at eye level land on the head
+  assert.ok(c.helmet<100,'the helmet takes the hit');
+  assert.equal(c.vest,100,'the vest is untouched by a head shot');
+  const worn=c.helmet;
+  a.cooldown=0;a.pitch=.62;b.shoot(a);           // aimed low, this is a body blow
+  assert.equal(c.helmet,worn,'a body blow leaves the helmet alone');
+  assert.ok(c.vest<100,'the vest takes the hit');
+  // The zone ignores armour entirely.
+  const before={h:c.helmet,v:c.vest};R.damage(c,10,true);
+  assert.deepEqual({h:c.helmet,v:c.vest},before);
+});
+
+test('helmet and vest drop as separate pickups and are refused when already full',()=>{
+  const b=game(),a=b.players.get('a');
+  assert.equal(R.collect(a,{type:'helmet',taken:false}),true);
+  assert.equal(a.helmet,100);
+  assert.equal(R.collect(a,{type:'helmet',taken:false}),false,'a full helmet slot refuses another');
+  assert.equal(R.collect(a,{type:'vest',taken:false}),true);
+  assert.equal(a.vest,100);
+  b.kill(a,null,'테스트');
+  const dropped=b.loot.filter(l=>l.id.startsWith('drop-')).map(l=>l.type);
+  assert.ok(dropped.includes('helmet')&&dropped.includes('vest'),'both pieces come off the body: '+dropped);
+});
+
+test('blades are lootable melee weapons, unlike fists',()=>{
+  const b=game(),a=b.players.get('a'),c=b.players.get('b');
+  assert.equal(R.collect(a,{type:'weapon',weapon:'knife',taken:false}),true);
+  assert.equal(a.equipped,'knife');
+  assert.equal(a.weapons.knife.ammo,0,'a blade carries no rounds');
+  assert.equal(b.action('a','reload'),false,'blades never reload');
+  assert.equal(R.collect(a,{type:'weapon',weapon:'knife',taken:false}),false,'a duplicate blade is left on the ground');
+  // Aim at the chest from 2.7m: inside the knife's 2.9m reach but beyond a fist's 2.4m.
+  a.x=0;a.z=0;a.yaw=0;a.pitch=Math.atan2(1.7-.84,2.7);c.x=0;c.z=2.7;c.hp=100;c.helmet=c.vest=0;
+  b.shoot(a);
+  assert.equal(c.hp,100-R.weapons.knife.damage,'a knife reaches further than a fist');
+  const reached=c.hp;a.cooldown=0;a.equipped='fists';b.shoot(a);
+  assert.equal(c.hp,reached,'a fist cannot reach that far');
+  a.equipped='knife';
+  b.kill(a,null,'테스트');
+  assert.ok(b.loot.some(l=>l.id.startsWith('drop-')&&l.weapon==='knife'),'a blade drops on death');
 });

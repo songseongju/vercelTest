@@ -18,7 +18,7 @@ function client(){
   if(response.status===404)throw Error('/api/health 404: 멀티플레이 API가 포함된 새 코드를 먼저 배포해 주세요.');
   const health=await response.json();if(!response.ok||!health.ok)throw Error(health.message||'서버 준비 실패');
   console.log('PASS server health:',health.version,health.storage);
-  for(const file of ['environment.js','assets/environment/asphalt-color.jpg','assets/environment/daylight.hdr']){
+  for(const file of ['environment.js','assets/environment/asphalt-color.jpg','assets/environment/daylight.hdr','assets/gear/kevlar-color.jpg','assets/gear/plate-color.jpg']){
     const asset=await fetch(new URL('/'+file,base),{method:'HEAD',signal:AbortSignal.timeout(10000)});
     assert.ok(asset.ok&&!asset.headers.get('content-type')?.includes('text/html'),'Missing asset '+file);
   }

@@ -21,7 +21,11 @@ const spawns=[[0,-52],[0,52],[-52,0],[52,0],[-38,-38],[38,38],[-38,38],[38,-38]]
 // Loot placement is randomised per round. Pass a seed for a reproducible layout.
 function rng(seed){let a=(seed>>>0)||1;return()=>{a=(a+0x6D2B79F5)>>>0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296}}
 const weaponPool=['carbine','carbine','smg','smg','marksman'];
-function randomWeapon(random=Math.random){return weaponPool[Math.min(weaponPool.length-1,Math.floor(random()*weaponPool.length))]}
+const groundPool=['carbine','carbine','smg','smg','marksman','knife','knife','machete'];
+const pick=(list,random)=>list[Math.min(list.length-1,Math.floor(random()*list.length))];
+// The guaranteed starter cache always holds a firearm; blades are a map find.
+function randomWeapon(random=Math.random){return pick(weaponPool,random)}
+function randomGroundWeapon(random=Math.random){return pick(groundPool,random)}
 // A spot players can actually walk onto: inside the field, clear of geometry and away from every spawn.
 function freeSpot(random,cx,cz,spread,clearSpawns=13,tries=30){
   for(let i=0;i<tries;i++){
@@ -53,25 +57,25 @@ function loot(seed){
     for(let i=0;i<count;i++){
       const spot=freeSpot(random,cx,cz,spread);if(!spot)continue;
       const roll=random();
-      if(roll<.38)add('weapon',spot[0],spot[1],randomWeapon(random));
-      else if(roll<.66)add('ammo',spot[0],spot[1],null,45+Math.floor(random()*4)*15);
-      else if(roll<.85)add('med',spot[0],spot[1]);
-      else add('armor',spot[0],spot[1]);
+      if(roll<.38)add('weapon',spot[0],spot[1],randomGroundWeapon(random));
+      else if(roll<.64)add('ammo',spot[0],spot[1],null,45+Math.floor(random()*4)*15);
+      else if(roll<.82)add('med',spot[0],spot[1]);
+      else add(random()<.5?'helmet':'vest',spot[0],spot[1]);
     }
   }
   for(let i=0;i<16;i++){
     const spot=freeSpot(random,0,0,58);if(!spot)continue;
     const roll=random();
-    if(roll<.26)add('weapon',spot[0],spot[1],randomWeapon(random));
-    else if(roll<.62)add('ammo',spot[0],spot[1],null,45+Math.floor(random()*4)*15);
-    else if(roll<.84)add('med',spot[0],spot[1]);
-    else add('armor',spot[0],spot[1]);
+    if(roll<.26)add('weapon',spot[0],spot[1],randomGroundWeapon(random));
+    else if(roll<.6)add('ammo',spot[0],spot[1],null,45+Math.floor(random()*4)*15);
+    else if(roll<.81)add('med',spot[0],spot[1]);
+    else add(random()<.5?'helmet':'vest',spot[0],spot[1]);
   }
   // A round is unplayable if the map is short of guns, so top up whatever the rolls missed.
   for(let guard=0;items.filter(x=>x.type==='weapon').length<10&&guard<60;guard++){
-    const spot=freeSpot(random,0,0,58);if(spot)add('weapon',spot[0],spot[1],randomWeapon(random));
+    const spot=freeSpot(random,0,0,58);if(spot)add('weapon',spot[0],spot[1],randomGroundWeapon(random));
   }
   return items;
 }
-return{buildings,cargos,barriers,crates,trees,colliders,spawns,blocked,move,rayBox,wallDistance,visible,loot,rng,randomWeapon,freeSpot,cacheSpot};
+return{buildings,cargos,barriers,crates,trees,colliders,spawns,blocked,move,rayBox,wallDistance,visible,loot,rng,randomWeapon,randomGroundWeapon,freeSpot,cacheSpot};
 });

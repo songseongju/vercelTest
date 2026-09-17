@@ -5,20 +5,21 @@
     const V=B.Vector3, C=B.Color3, surfaces=[], normalMaps=new Map();
     const root='assets/environment/';
     function texture(file, color=false) {
-      const t=new B.Texture(root+file,scene,false,false);
+      const t=new B.Texture(file.includes('/')?'assets/'+file:root+file,scene,false,false);
       t.gammaSpace=color;t.anisotropicFilteringLevel=lightweight?2:8;
       return t;
     }
-    function surface(name,asset,meters,tint='#ffffff',metallic=0) {
+    function surface(name,asset,meters,tint='#ffffff',metallic=0,roughness=1,tile=0) {
       const m=new B.PBRMaterial(name,scene);
-      m.albedoColor=C.FromHexString(tint);m.metallic=metallic;m.roughness=1;
+      m.albedoColor=C.FromHexString(tint);m.metallic=metallic;m.roughness=roughness;
       m.albedoTexture=texture(asset+'-color.jpg',true);
       m.metallicTexture=texture(asset+'-arm.jpg');
       m.useRoughnessFromMetallicTextureAlpha=false;
       m.useRoughnessFromMetallicTextureGreen=true;
       m.useMetallnessFromMetallicTextureBlue=true;
       m.useAmbientOcclusionFromMetallicTextureRed=true;
-      m.environmentIntensity=.65;m.metadata={meters,asset};
+      m.environmentIntensity=.65;m.metadata={meters,asset,tile};
+      if(tile)for(const t of [m.albedoTexture,m.metallicTexture]){t.uScale=t.vScale=tile;}
       surfaces.push(m);return m;
     }
     // UVs are measured in metres on each face, avoiding stretched wall/floor photos.
@@ -39,7 +40,12 @@
       concrete:surface('cast concrete','concrete',3,'#aaa99f'),
       cream:surface('weathered concrete walls','concrete',3,'#d0cbc0'),
       roof:surface('oxidized corrugated steel','metal',3,'#9da8aa',.55),
-      bark:surface('tree bark','bark',2,'#ada292')
+      bark:surface('tree bark','bark',2,'#ada292'),
+      // Worn gear, sized in centimetres rather than metres so the weave reads at arm's length.
+      kevlar:surface('ballistic weave','gear/kevlar',.42,'#6e7355',0,1,3),
+      helmetShell:surface('painted helmet shell','gear/plate',.7,'#59614a',.35,.62,1.6),
+      blade:surface('forged blade','gear/plate',.5,'#b7c0c6',.85,.34,1),
+      grip:surface('wrapped leather grip','gear/leather',.16,'#4a4038',0,.78,3)
     };
     const env=new B.HDRCubeTexture(root+'daylight.hdr',scene,lightweight?32:128,false,true,false,true);
     scene.environmentTexture=env;scene.environmentIntensity=.7;
@@ -84,7 +90,7 @@
       for(const m of surfaces){
         if(high&&!normalMaps.has(m.metadata.asset))normalMaps.set(m.metadata.asset,texture(m.metadata.asset+'-normal.jpg'));
         m.bumpTexture=high?normalMaps.get(m.metadata.asset):null;
-        if(m.bumpTexture)m.bumpTexture.level=.65;
+        if(m.bumpTexture){m.bumpTexture.level=.65;if(m.metadata.tile)m.bumpTexture.uScale=m.bumpTexture.vScale=m.metadata.tile;}
       }
     }
     return{materials,surface,mapBox,tree,quality};

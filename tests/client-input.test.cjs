@@ -25,6 +25,24 @@ run('enemies[0].root.position.set(0,0,-40);enemies[0].root.rotation.y=Math.PI;sc
 assert.equal(run('scene.pickWithRay(new B.Ray(new V(0,enemies[0].headHit.position.y,-44),new V(0,0,1),5),m=>m===enemies[0].headHit).hit'),true);
 run('pause()');const old=run('time');run('tick(1);scene.render()');assert.equal(run('time'),old);run('resume();modelAnimation(enemies[0],"Run");scene.render()');assert.equal(run('enemies[0].motion'),'Run');
 run('die(enemies[0],"player");scene.render()');assert.equal(run('corpses.length'),1);assert.equal(run('corpses[0].e.headHit.isPickable'),false);run('resetRound();scene.render()');assert.equal(run('corpses.length'),0);assert.equal(run('enemies.length'),12);assert.equal(run('scene.animationGroups.filter(a=>a.name.startsWith("bot")&& !a.name.startsWith("bot0_")).length'),48,'restart must not leak animation groups');
-run('for(const e of [...enemies])die(e,"player")');assert.equal(run('state'),'won');assert.ok(run("loot.filter(l=>l.type==='med').every(l=>l.root.getChildMeshes().some(m=>m.name==='carry handle'))"));assert.ok(run("loot.filter(l=>l.type==='armor').every(l=>l.root.getChildMeshes().filter(m=>m.name==='shoulder strap').length===2)"));run("resetRound();scene.render();const m=loot.find(l=>l.type==='med'&&!l.taken);camera.position.set(m.x,1.7,m.z);scene.render();searchLoot();");element('pickup').onclick();assert.equal(run('player.kits'),1,'tap pickup card collects med');run("const v=loot.find(l=>l.type==='armor'&&!l.taken);camera.position.set(v.x,1.7,v.z);scene.render();searchLoot();");element('loot').onclick();assert.equal(run('player.armor'),100,'touch button collects armor');
+run('for(const e of [...enemies])die(e,"player")');assert.equal(run('state'),'won');assert.ok(run("loot.filter(l=>l.type==='med').every(l=>l.root.getChildMeshes().some(m=>m.name==='carry handle'))"));assert.ok(run("loot.some(l=>l.type==='vest')&&loot.filter(l=>l.type==='vest').every(l=>l.root.getChildMeshes().filter(m=>m.name==='shoulder strap').length===2)"),'vests keep their straps');
+assert.ok(run("loot.some(l=>l.type==='helmet')&&loot.filter(l=>l.type==='helmet').every(l=>l.root.getChildMeshes().some(m=>m.name==='helmet shell'))"),'helmets render as helmets');
+assert.equal(run("loot.some(l=>l.type==='armor')"),false,'the old single armour item is gone');run("resetRound();scene.render();const m=loot.find(l=>l.type==='med'&&!l.taken);camera.position.set(m.x,1.7,m.z);scene.render();searchLoot();");element('pickup').onclick();assert.equal(run('player.kits'),1,'tap pickup card collects med');run("const v=loot.find(l=>l.type==='vest'&&!l.taken);camera.position.set(v.x,1.7,v.z);scene.render();searchLoot();");element('loot').onclick();assert.equal(run('player.vest'),100,'touch button collects the vest');
+run("const h=loot.find(l=>l.type==='helmet'&&!l.taken);camera.position.set(h.x,1.7,h.z);scene.render();searchLoot();collect();");assert.equal(run('player.helmet'),100,'helmets are a separate pickup');
+// Worn gear has to show up on the body, not just in the numbers.
+run('state="playing";ads=false;thirdPerson=false;toggleView();placeView(false)');
+assert.equal(run('selfBody.gearHelmet.isEnabled()'),true,'the helmet appears on your own body');
+assert.equal(run('selfBody.gearVest.isEnabled()'),true,'so does the vest');
+run("const k=loot.find(l=>l.type==='weapon'&&l.weapon==='knife'&&!l.taken);if(k){camera.position.set(k.x,1.7,k.z);scene.render();collect()}");
+if(run("player.equipped==='knife'")){
+  run('placeView(false)');
+  assert.equal(run('selfBody.blade.isEnabled()'),true,'a drawn blade shows in the hands');
+  assert.equal(run('selfBody.rifle.isEnabled()'),false,'and the rifle goes away');
+  run('thirdPerson=false;updateGun()');
+  assert.equal(run('bladeView.isEnabled()'),true,'first person shows the blade view model');
+  const before=run('punchTimer');run('shotTimer=0;shoot()');
+  assert.ok(run('punchTimer')>before,'swinging drives the arm animation');
+}
+run('thirdPerson=false;ads=false;updateGun();placeView(false)');
 // Third person must swap the rendering camera without moving the eye the shot ray comes from.
 run('state="playing";ads=false;const eye=camera.position.clone();toggleView();placeView(false);');assert.equal(run('thirdPerson'),true);assert.equal(run('scene.activeCamera===viewCam'),true);assert.ok(run('V.Distance(viewCam.position,camera.position)>1'),'shoulder camera sits behind the eye');run('ads=true;placeView(false)');assert.equal(run('scene.activeCamera===camera'),true,'aiming snaps back to first person');run('ads=false;toggleView();placeView(false)');assert.equal(run('scene.activeCamera===camera'),true);run('scene.dispose();engine.dispose()');console.log('PASS: fists, randomised loot, third-person camera, actual GLB load, 12 independent skeletons, idle/walk/run clips, posed hands/head bounds, head hit detection, loot/fire/reload, pause, corpse cleanup, restart without animation leaks, win.');});

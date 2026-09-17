@@ -1,5 +1,6 @@
-// Pin the map so the walk-to-loot run is reproducible; randomness itself is covered in simulation.test.cjs.
-process.env.LOOT_SEED='3';
+// Pin the map so the walk-to-loot run is reproducible: seed 58 puts a long-range rifle in sight of the spawn.
+// Loot randomness itself is covered in simulation.test.cjs.
+process.env.LOOT_SEED='58';
 const test=require('node:test'),assert=require('node:assert/strict'),{WebSocket}=require('ws');
 const{createApp}=require('../server/app.cjs'),{MemoryStore}=require('../server/store.cjs');
 function client(url){const ws=new WebSocket(url),messages=[],waiters=[];ws.on('message',raw=>{const data=JSON.parse(raw.toString());messages.push(data);for(const w of [...waiters])if(w.predicate(data)){clearTimeout(w.timer);waiters.splice(waiters.indexOf(w),1);w.resolve(data)}});return{ws,messages,opened:new Promise((r,j)=>{ws.once('open',r);ws.once('error',j)}),send:msg=>ws.send(JSON.stringify(msg)),wait(predicate,timeout=6000){const existing=messages.find(predicate);if(existing)return Promise.resolve(existing);return new Promise((resolve,reject)=>{const w={predicate,resolve,timer:setTimeout(()=>{waiters.splice(waiters.indexOf(w),1);reject(Error('timeout '+messages.slice(-1).map(x=>JSON.stringify(x)).join()))},timeout)};waiters.push(w)})}}}
@@ -26,8 +27,8 @@ async function walkTo(c,id,target,seq,reach=1.5){
   }
   return null;
 }
-// The walker has no pathfinding, so only aim at a gun it can actually see from here.
-const nearestWeapon=(state,me)=>state.loot.filter(l=>l.type==='weapon'&&W.visible({x:me.x,y:1.7,z:me.z},{x:l.x,y:.45,z:l.z}))
+// The walker has no pathfinding and the duel happens at 100m, so only aim at a firearm in plain sight.
+const nearestWeapon=(state,me)=>state.loot.filter(l=>l.type==='weapon'&&!R.weapons[l.weapon].melee&&W.visible({x:me.x,y:1.7,z:me.z},{x:l.x,y:.45,z:l.z}))
   .map(l=>({...l,d:Math.hypot(l.x-me.x,l.z-me.z)})).sort((a,b)=>a.d-b.d)[0];
 async function exerciseRoom(t,store){const a=await server(store),b=await server(store);t.after(async()=>{await a.stop();await b.stop()});const one=client(a.url),two=client(b.url);await Promise.all([one.opened,two.opened]);one.send({type:'create',name:'Alpha'});const first=await one.wait(m=>m.type==='joined');assert.match(first.room,/^[A-Z2-9]{6}$/);two.send({type:'join',room:first.room,name:'Bravo'});const second=await two.wait(m=>m.type==='joined');assert.notEqual(first.id,second.id);await one.wait(m=>m.type==='state'&&m.snapshot.players.length===2);one.send({type:'action',action:'ready',data:true});two.send({type:'action',action:'ready',data:true});await one.wait(m=>m.type==='state'&&m.snapshot.players.every(p=>p.ready));one.send({type:'action',action:'start'});await Promise.all([one.wait(m=>m.type==='state'&&m.snapshot.phase==='playing'),two.wait(m=>m.type==='state'&&m.snapshot.phase==='playing')]);
 const beats=[one,two].map(c=>setInterval(()=>c.send({type:'ping',at:Date.now()}),1200));t.after(()=>beats.forEach(clearInterval));
@@ -37,18 +38,31 @@ assert.equal(latest(one,m=>m.type==='state').snapshot.me.equipped,'fists','a rou
 const target=await walkTo(one,first.id,state=>nearestWeapon(state,state.players.find(p=>p.id===first.id)),seq,2.2);
 assert.ok(target,'player one reached a weapon on the randomised map, last position '+JSON.stringify(latest(one,m=>m.type==='state').snapshot.players.find(p=>p.id===first.id)));
 await two.wait(m=>m.type==='state'&&m.snapshot.players.some(p=>p.id===first.id&&Math.hypot(p.x-spawn.x,p.z-spawn.z)>3),12000);
-for(let grab=0;grab<25&&latest(one,m=>m.type==='state')?.snapshot.me.equipped==='fists';grab++){one.send({type:'action',action:'collect'});await new Promise(r=>setTimeout(r,200))}
-const looted=await one.wait(m=>m.type==='state'&&m.snapshot.me.equipped!=='fists',12000);
+const firearm=()=>{const held=latest(one,m=>m.type==='state')?.snapshot.me.equipped;return held&&!R.weapons[held].melee&&held!=='fists'};
+for(let grab=0;grab<30&&!firearm();grab++){one.send({type:'action',action:'collect'});await new Promise(r=>setTimeout(r,200))}
+const looted=await one.wait(m=>m.type==='state'&&m.snapshot.me.equipped!=='fists'&&!R.weapons[m.snapshot.me.equipped].melee,12000);
 const gun=looted.snapshot.me.equipped;
 assert.ok(R.weapons[gun]&&!R.weapons[gun].melee,'picked up a real firearm');
 assert.equal(looted.snapshot.me.weapons[gun].ammo,R.weapons[gun].mag);
 // Back to the spawn lane, which has clear line of sight straight down the z axis to Bravo.
-await walkTo(one,first.id,{x:spawn.x,z:spawn.z},seq,1);
+const home=await walkTo(one,first.id,{x:spawn.x,z:spawn.z},seq,2.5);
+assert.ok(home,'player one walked back to the spawn lane');
+{ const players=latest(one,m=>m.type==='state').snapshot.players;
+  const me=players.find(p=>p.id===first.id),foe=players.find(p=>p.id===second.id);
+  assert.ok(W.visible({x:me.x,y:1.7,z:me.z},{x:foe.x,y:.84,z:foe.z}),'the spawn lane gives a clear shot at Bravo'); }
 clearInterval(beats[0]);one.ws.terminate();const again=client(b.url);await again.opened;const revived=setInterval(()=>again.send({type:'ping',at:Date.now()}),1200);t.after(()=>clearInterval(revived));
 again.send({type:'reconnect',room:first.room,id:first.id,token:first.token});const resumed=await again.wait(m=>m.type==='joined');assert.equal(resumed.id,first.id);
 const restored=await again.wait(m=>m.type==='state'&&m.snapshot.me.equipped===gun,12000);assert.equal(restored.snapshot.me.weapons[gun].ammo,R.weapons[gun].mag,'reconnect keeps the magazine');
 const attack=client(a.url);await attack.opened;attack.send({type:'reconnect',room:first.room,id:first.id,token:'0'.repeat(48)});assert.match((await attack.wait(m=>m.type==='error')).message,/재접속/);attack.ws.close();
 // Aim from the live positions: a metre of drift at 100m is a clean miss past a 0.3m hitbox.
+// The map hands out whatever it hands out; a short-range gun has to close the distance first.
+{ const players=latest(again,m=>m.type==='state')?.snapshot.players||[];
+  const me=players.find(p=>p.id===first.id),foe=players.find(p=>p.id===second.id);
+  if(me&&foe&&Math.hypot(foe.x-me.x,foe.z-me.z)>R.weapons[gun].range*.85){
+    await walkTo(again,first.id,state=>{const t=state.players.find(p=>p.id===second.id);const s=state.players.find(p=>p.id===first.id);
+      const span=Math.hypot(t.x-s.x,t.z-s.z),step=R.weapons[gun].range*.6;
+      return{x:t.x+(s.x-t.x)/span*step,z:t.z+(s.z-t.z)/span*step}},seq,4);
+  } }
 let fired=0;
 while(fired<60&&!latest(again,m=>m.type==='state')?.snapshot.winner){
   const players=latest(again,m=>m.type==='state')?.snapshot.players||[];
