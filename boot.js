@@ -50,11 +50,15 @@
     script.onerror = function () { fail('게임 파일을 불러오지 못했습니다.', files[index][0]); };
     document.head.appendChild(script);
   }
-  // Give Safari a chance to paint the lightweight UI before compiling the engine.
-  requestAnimationFrame(function () {
-    requestAnimationFrame(function () {
-      timer = setTimeout(function () { fail('로딩이 오래 걸리고 있습니다.', status.textContent + ' · 연결을 확인하고 다시 시도해 주세요.'); }, 90000);
-      load(0);
-    });
-  });
+  // Give Safari a chance to paint the lightweight UI before compiling the engine. A background
+  // tab never fires an animation frame, so a timer starts the download if the frames never come.
+  var started = false;
+  function begin() {
+    if (started) return;
+    started = true;
+    timer = setTimeout(function () { fail('로딩이 오래 걸리고 있습니다.', status.textContent + ' · 연결을 확인하고 다시 시도해 주세요.'); }, 90000);
+    load(0);
+  }
+  requestAnimationFrame(function () { requestAnimationFrame(begin); });
+  setTimeout(begin, 500);
 })();

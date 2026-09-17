@@ -33,13 +33,13 @@ if(type==='med'){panel(root,'soft medical bag',round,.3,med,cloth,0,.25,0);tube(
   body.parent=root;body.position.y=flash?.17:.14;if(!flash)body.scaling.y=1.22;
   body.material=shell;body.isPickable=false;body.receiveShadows=true;
   if(flash){for(let i=0;i<3;i++){const vent=B.MeshBuilder.CreateTorus('vent band',{diameter:.175,thickness:.016,tessellation:14},scene);vent.parent=root;vent.position.y=.09+i*.08;vent.material=dark;vent.isPickable=false}}
-  else{for(const axis of [0,1])for(let i=-1;i<2;i++){const groove=part(root,'frag groove',0,.14+i*.07,0,axis?.235:.02,.018,axis?.02:.235,dark);groove.scaling.set(1,1,1)}
+  else{for(const axis of [0,1])for(let i=-1;i<2;i++){part(root,'frag groove',0,.14+i*.07,0,axis?.222:.02,.016,axis?.02:.222,dark)}
     for(let i=0;i<4;i++){const band=B.MeshBuilder.CreateTorus('frag band',{diameter:.225,thickness:.012,tessellation:14},scene);band.parent=root;band.position.y=.07+i*.05;band.material=dark;band.isPickable=false}}
   part(root,'fuse cap',0,flash?.335:.28,0,.07,.045,.07,metal);
   part(root,'safety spoon',.052,flash?.3:.245,0,.018,.13,.05,metal);
   const ring=B.MeshBuilder.CreateTorus('pull ring',{diameter:.075,thickness:.011,tessellation:12},scene);
   ring.parent=root;ring.position.set(-.062,flash?.325:.27,0);ring.rotation.x=Math.PI/2;ring.material=metal;ring.isPickable=false;
-  part(root,'marking band',0,flash?.25:.19,0,flash?.18:.235,.022,flash?.18:.235,flash?red:brass);
+  part(root,'marking band',0,flash?.25:.17,0,flash?.174:.207,.02,flash?.174:.207,flash?red:brass);
 }else if(weapon==='knife'||weapon==='machete'){
   const held=new B.TransformNode('field blade',scene);held.parent=root;held.position.set(0,.13,0);held.rotation.set(0,.5,Math.PI/2.3);
   const long=weapon==='machete',blade=B.MeshBuilder.CreateBox('blade',{width:long?.105:.052,height:.012,depth:long?.62:.32},scene);

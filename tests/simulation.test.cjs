@@ -3,10 +3,11 @@ const {Battle}=require('../server/simulation.cjs'),W=require('../shared/world.js
 function game(){const b=new Battle();b.add('a','Alpha');b.add('b','Bravo');b.action('a','ready',true);b.action('b','ready',true);assert.equal(b.action('a','start'),true);for(let i=0;i<61;i++)b.step();return b}
 test('lobby requires two ready players and only host can start',()=>{const b=new Battle();b.add('a','A');assert.equal(b.action('a','start'),false);b.add('b','B');b.action('a','ready',true);assert.equal(b.action('a','start'),false);b.action('b','ready',true);assert.equal(b.action('b','start'),false);assert.equal(b.action('a','start'),true);assert.throws(()=>b.add('c','C'));});
 test('server caps movement, rejects NaN/replayed input, times out held input',()=>{const b=game(),p=b.players.get('a'),z=p.z;assert.equal(b.input('a',{x:0,z:999,yaw:0,pitch:0,seq:1}),true);b.step();assert.ok(p.z-z<=.241);assert.equal(b.input('a',{x:0,z:1,yaw:0,pitch:0,seq:1}),false);assert.equal(b.input('a',{x:NaN,z:1,yaw:0,pitch:0,seq:2}),false);for(let i=0;i<10;i++)b.step();const stop=p.z;b.step();assert.equal(p.z,stop);});
-test('shared world blocks walls but permits doors and respects ray cover',()=>{assert.equal(W.blocked(-17,-40.5),false);assert.equal(W.blocked(-21,-40.5),true);assert.equal(W.visible({x:-21,y:1.7,z:-42},{x:-21,y:1.7,z:-39}),false);assert.equal(W.visible({x:-17,y:1.7,z:-42},{x:-17,y:1.7,z:-39}),true);});
+// The hut at [-24,-38] has its doorway centred on the south face.
+test('shared world blocks walls but permits doors and respects ray cover',()=>{assert.equal(W.blocked(-24,-44.5),false);assert.equal(W.blocked(-29,-44.5),true);assert.equal(W.visible({x:-29,y:1.7,z:-46},{x:-29,y:1.7,z:-42}),false);assert.equal(W.visible({x:-24,y:1.7,z:-46},{x:-24,y:1.7,z:-42}),true);});
 test('loot is awarded once; distance and walls prevent remote collection',()=>{const b=game(),a=b.players.get('a'),c=b.players.get('b');b.loot=[{id:'one',type:'weapon',weapon:'carbine',x:0,z:0}];a.x=c.x=0;a.z=c.z=0;assert.equal(b.action('a','collect'),true);assert.equal(b.action('b','collect'),false);assert.equal(a.weapons.carbine.ammo,30);b.loot=[{id:'far',type:'med',x:30,z:0}];assert.equal(b.action('a','collect'),false);});
 test('server shoots, limits fire rate, cancels healing, ends the match',()=>{const b=game(),a=b.players.get('a'),p=b.players.get('b');a.x=p.x=0;a.z=0;p.z=5;a.equipped='carbine';a.weapons.carbine={ammo:30};a.yaw=0;a.pitch=.05;p.heal=3;b.shoot(a);assert.equal(a.weapons.carbine.ammo,29);assert.ok(p.hp<100);assert.equal(p.heal,0);b.shoot(a);assert.equal(a.weapons.carbine.ammo,29);for(let i=0;i<10&&p.hp>0;i++){a.cooldown=0;b.shoot(a)}b.checkWinner();assert.equal(p.hp,0);assert.equal(a.kills,1);assert.equal(b.phase,'finished');assert.equal(b.winner,'a');});
-test('cover stops authoritative hits; disconnected input stops and host changes',()=>{const b=game(),a=b.players.get('a'),p=b.players.get('b');a.x=p.x=-21;a.z=-42;p.z=-39;a.yaw=0;a.pitch=0;a.equipped='carbine';a.weapons.carbine={ammo:30};b.shoot(a);assert.equal(p.hp,100);b.setConnected('a',false);assert.equal(b.host,'b');assert.equal(b.input('a',{x:1,z:0,yaw:0,pitch:0,seq:1}),false);});
+test('cover stops authoritative hits; disconnected input stops and host changes',()=>{const b=game(),a=b.players.get('a'),p=b.players.get('b');a.x=p.x=-29;a.z=-46;p.z=-42;a.yaw=0;a.pitch=0;a.equipped='carbine';a.weapons.carbine={ammo:30};b.shoot(a);assert.equal(p.hp,100);b.setConnected('a',false);assert.equal(b.host,'b');assert.equal(b.input('a',{x:1,z:0,yaw:0,pitch:0,seq:1}),false);});
 test('server completes reload and healing, applies shrinking zone damage',()=>{const b=game(),a=b.players.get('a');a.equipped='carbine';a.weapons.carbine={ammo:1};a.reserve=40;assert.equal(b.action('a','reload'),true);for(let i=0;i<40;i++)b.step();assert.equal(a.weapons.carbine.ammo,30);assert.equal(a.reserve,11);a.hp=20;a.kits=1;b.action('a','heal');for(let i=0;i<61;i++)b.step();assert.equal(a.hp,85);assert.equal(a.kits,0);b.time=240;a.x=60;a.z=0;a.armor=100;b.step();assert.ok(a.hp<85);assert.equal(a.armor,100);});
 test('a round can move to another process without losing authoritative state',()=>{const a=game();a.action('a','collect');a.step();const b=Battle.restore(a.serialize());assert.deepEqual(b.snapshot('a'),a.snapshot('a'));a.step();b.step();assert.deepEqual(b.snapshot('a'),a.snapshot('a'));});
 
@@ -14,7 +15,8 @@ const R=require('../rules.js');
 test('loot is scattered randomly, never inside geometry and never on top of a spawn',()=>{
   for(const seed of [3,11,404]){
     const items=W.loot(seed);
-    assert.ok(items.filter(i=>i.type==='weapon').length>=10,'a round must hold enough guns for eight players');
+    assert.ok(items.filter(i=>i.type==='weapon').length>=22,'a round must hold enough guns for sixteen players');
+    assert.ok(items.some(i=>i.type==='frag')&&items.some(i=>i.type==='flash'),'both throwables have to appear on the map');
     assert.ok(items.every(i=>!W.blocked(i.x,i.z,.4)),'every item must be reachable');
     assert.ok(items.every(i=>W.spawns.every(([x,z])=>Math.hypot(i.x-x,i.z-z)>=13)),'nothing may drop at a spawn point');
     assert.deepEqual(W.loot(seed),items,'a seed reproduces its layout');
@@ -115,4 +117,78 @@ test('blades are lootable melee weapons, unlike fists',()=>{
   a.equipped='knife';
   b.kill(a,null,'테스트');
   assert.ok(b.loot.some(l=>l.id.startsWith('drop-')&&l.weapon==='knife'),'a blade drops on death');
+});
+
+test('a room seats sixteen and refuses the seventeenth',()=>{
+  const b=new Battle();
+  for(let i=0;i<16;i++)b.add('p'+i,'P'+i);
+  assert.equal(b.players.size,16);
+  assert.throws(()=>b.add('p16','late'));
+  assert.equal(new Set(W.spawns.map(s=>s.join(','))).size,16,'every seat needs its own drop point');
+  assert.ok(W.spawns.every(([x,z])=>!W.blocked(x,z,.5)),'nobody may spawn inside geometry');
+});
+
+test('a frag hurts what the blast can see and a flash only blinds',()=>{
+  const b=game(),a=b.players.get('a'),c=b.players.get('b');
+  // The thrower stands well clear so the round does not end on its own blast.
+  a.x=0;a.z=0;a.yaw=0;a.pitch=-.2;a.frags=1;a.flashes=1;
+  c.x=16;c.z=0;c.hp=100;c.helmet=c.vest=0;c.yaw=Math.PI/2;
+  assert.equal(b.action('a','throw',{kind:'frag',yaw:0,pitch:0}),true);
+  assert.equal(a.frags,0,'the pouch is charged when it leaves the hand');
+  assert.equal(b.grenades.length,1);
+  const park=g=>{g.x=21;g.z=0;g.y=.2;g.vx=g.vy=g.vz=0};
+  park(b.grenades[0]);
+  for(let i=0;i<80&&b.grenades.length;i++)b.step();
+  assert.equal(b.grenades.length,0,'the fuse runs out');
+  assert.ok(c.hp<100&&c.hp>0,'a frag five metres away hurts without killing: '+c.hp);
+  assert.equal(a.hp,100,'and leaves the thrower alone at sixteen metres');
+  assert.equal(c.blind,0,'a frag does not blind');
+  const wounded=c.hp;
+  a.throwAt=-1;c.yaw=Math.PI;c.pitch=0;
+  assert.equal(b.action('a','throw',{kind:'flash',yaw:0,pitch:0}),true);
+  park(b.grenades[0]);
+  for(let i=0;i<70&&b.grenades.length;i++)b.step();
+  assert.equal(c.hp,wounded,'a flash deals no damage');
+  assert.ok(c.blind>0,'a flash blinds whoever can see it');
+  a.throwAt=-1;
+  assert.equal(b.action('a','throw',{kind:'frag',yaw:0,pitch:0}),false,'an empty pouch throws nothing');
+  assert.equal(b.action('a','throw',{kind:'rock',yaw:0,pitch:0}),false,'only real ordnance is accepted');
+});
+
+test('a wall between you and a blast stops it, and blindness wears off',()=>{
+  const b=game(),a=b.players.get('a'),c=b.players.get('b');
+  // Either side of the hut wall the cover test already pins down; the thrower is elsewhere.
+  a.x=0;a.z=0;c.x=-29;c.z=-42;c.hp=100;c.helmet=c.vest=0;
+  b.detonate({kind:'frag',x:-29,y:.4,z:-46});
+  assert.equal(c.hp,100,'the wall takes it');
+  b.detonate({kind:'flash',x:-29,y:.4,z:-46});
+  assert.equal(c.blind,0,'and blocks the flash too');
+  c.blind=2;for(let i=0;i<50;i++)b.step();
+  assert.equal(b.phase,'playing','both players are still standing');
+  assert.equal(c.blind,0,'blindness clears on its own');
+});
+
+test('throwables are loot, are capped, and drop again on death',()=>{
+  const b=game(),a=b.players.get('a');
+  for(let i=0;i<4;i++)R.collect(a,{type:'frag',taken:false});
+  assert.equal(a.frags,3,'three is the pouch limit');
+  assert.equal(R.collect(a,{type:'flash',taken:false}),true);
+  assert.equal(a.flashes,1);
+  b.kill(a,null,'테스트');
+  const dropped=b.loot.filter(l=>l.id.startsWith('drop-')).map(l=>l.type);
+  assert.ok(dropped.includes('frag')&&dropped.includes('flash'),'the pouch comes off the body: '+dropped);
+});
+
+test('a snapshot carries ordnance in flight and survives a process move',()=>{
+  const b=game(),a=b.players.get('a');
+  a.frags=1;b.action('a','throw',{kind:'frag',yaw:.3,pitch:-.3});
+  b.step(.05);
+  const snap=b.snapshot('a');
+  assert.equal(snap.grenades.length,1);
+  assert.equal(snap.me.frags,0);
+  assert.ok(Number.isFinite(snap.grenades[0].y));
+  const moved=Battle.restore(b.serialize());
+  assert.deepEqual(moved.snapshot('a'),snap);
+  b.step(.05);moved.step(.05);
+  assert.deepEqual(moved.snapshot('a'),b.snapshot('a'));
 });

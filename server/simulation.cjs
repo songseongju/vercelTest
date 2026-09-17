@@ -27,7 +27,11 @@ class Battle {
       g.id='nade-'+(++this.serial);g.owner=p.id;this.grenades.push(g);this.events.push({type:'throw',id:p.id,kind:data.kind,nade:g.id});return true}
     return false;
   }
-  startRound(){this.phase='playing';this.time=0;this.round++;this.winner='';this.loot=W.loot(seed??undefined);this.grenades=[];const roll=seed===null?Math.random:W.rng(seed);let i=0;for(const p of this.players.values()){Object.assign(p,R.newPlayer(),{reload:0,heal:0,cooldown:0,throwAt:-1,input:emptyInput(),lastSeq:0});const[x,z]=W.spawns[i++];p.x=x;p.z=z;p.yaw=Math.atan2(-x,-z)||0;p.pitch=0;
+  startRound(){this.phase='playing';this.time=0;this.round++;this.winner='';this.loot=W.loot(seed??undefined);this.grenades=[];const roll=seed===null?Math.random:W.rng(seed);let i=0;const seats=this.players.size;
+    // Spread drops around the ring instead of filling it in join order, so a two-player
+    // match starts on opposite sides of the field rather than next to each other.
+    for(const p of this.players.values()){Object.assign(p,R.newPlayer(),{reload:0,heal:0,cooldown:0,throwAt:-1,input:emptyInput(),lastSeq:0});
+    const[x,z]=W.spawns[Math.round(i++*W.spawns.length/Math.max(1,seats))%W.spawns.length];p.x=x;p.z=z;p.yaw=Math.atan2(-x,-z)||0;p.pitch=0;
     // Everyone starts bare-handed; the guaranteed cache is a sprint away in a direction nobody can predict.
     const[cx,cz]=W.cacheSpot(x,z,roll);const drops=[['weapon',0,0,W.randomWeapon(roll)],['ammo',.9,.5,null],['med',-.9,.5,null],['vest',0,-1.1,null],['helmet',-1.5,-.6,null]];
     for(const[type,ox,oz,weapon]of drops){let lx=cx+ox,lz=cz+oz;if(W.blocked(lx,lz,.1)){lx=cx;lz=cz}this.loot.push({id:'spawn-'+p.id+'-'+type,type,x:lx,z:lz,weapon,amount:60,taken:false})}}

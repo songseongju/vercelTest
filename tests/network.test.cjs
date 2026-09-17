@@ -10,7 +10,7 @@ const latest=(c,predicate)=>c.messages.filter(predicate).at(-1);
 // Loot is randomised now, so the test walks the player to whatever the round generated.
 async function walkTo(c,id,target,seq,reach=1.5){
   let previous=null,stuck=0;
-  for(let attempt=0;attempt<420;attempt++){
+  for(let attempt=0;attempt<600;attempt++){
     const state=latest(c,m=>m.type==='state')?.snapshot;
     const me=state?.players.find(p=>p.id===id);
     if(me){
@@ -18,17 +18,24 @@ async function walkTo(c,id,target,seq,reach=1.5){
       if(!goal)return null;
       const dx=goal.x-me.x,dz=goal.z-me.z,distance=Math.hypot(dx,dz);
       if(distance<reach)return goal;
-      let yaw=Math.atan2(dx,dz);
+      // Steer with whiskers: the heading closest to the goal that has clear ground ahead.
+      const want=Math.atan2(dx,dz);let yaw=want,best=-Infinity;
+      for(const turn of [0,.3,-.3,.6,-.6,.9,-.9,1.3,-1.3,1.8,-1.8,2.4,-2.4,Math.PI]){
+        const a=want+turn;let clear=0;
+        for(let step=1;step<=8;step++){if(W.blocked(me.x+Math.sin(a)*step*1.2,me.z+Math.cos(a)*step*1.2,.7))break;clear=step}
+        const score=clear*2-Math.abs(turn)*(stuck?.5:2.2);
+        if(score>best){best=score;yaw=a}
+      }
       if(previous&&Math.hypot(me.x-previous.x,me.z-previous.z)<.04){stuck++;yaw+=stuck%2?1.2:-1.2}else stuck=0;
       previous={x:me.x,z:me.z};
       c.send({type:'input',data:{x:0,z:1,yaw,pitch:0,sprint:true,seq:seq.n++}});
     }
-    await new Promise(r=>setTimeout(r,60));
+    await new Promise(r=>setTimeout(r,50));
   }
   return null;
 }
-// The walker has no pathfinding and the duel happens at 100m, so only aim at a firearm in plain sight.
-const nearestWeapon=(state,me)=>state.loot.filter(l=>l.type==='weapon'&&!R.weapons[l.weapon].melee&&W.visible({x:me.x,y:1.7,z:me.z},{x:l.x,y:.45,z:l.z}))
+// The walker steers around cover now, so head for the nearest firearm whether or not it is in sight.
+const nearestWeapon=(state,me)=>state.loot.filter(l=>l.type==='weapon'&&!R.weapons[l.weapon].melee)
   .map(l=>({...l,d:Math.hypot(l.x-me.x,l.z-me.z)})).sort((a,b)=>a.d-b.d)[0];
 async function exerciseRoom(t,store){const a=await server(store),b=await server(store);t.after(async()=>{await a.stop();await b.stop()});const one=client(a.url),two=client(b.url);await Promise.all([one.opened,two.opened]);one.send({type:'create',name:'Alpha'});const first=await one.wait(m=>m.type==='joined');assert.match(first.room,/^[A-Z2-9]{6}$/);two.send({type:'join',room:first.room,name:'Bravo'});const second=await two.wait(m=>m.type==='joined');assert.notEqual(first.id,second.id);await one.wait(m=>m.type==='state'&&m.snapshot.players.length===2);one.send({type:'action',action:'ready',data:true});two.send({type:'action',action:'ready',data:true});await one.wait(m=>m.type==='state'&&m.snapshot.players.every(p=>p.ready));one.send({type:'action',action:'start'});await Promise.all([one.wait(m=>m.type==='state'&&m.snapshot.phase==='playing'),two.wait(m=>m.type==='state'&&m.snapshot.phase==='playing')]);
 const beats=[one,two].map(c=>setInterval(()=>c.send({type:'ping',at:Date.now()}),1200));t.after(()=>beats.forEach(clearInterval));
@@ -44,25 +51,26 @@ const looted=await one.wait(m=>m.type==='state'&&m.snapshot.me.equipped!=='fists
 const gun=looted.snapshot.me.equipped;
 assert.ok(R.weapons[gun]&&!R.weapons[gun].melee,'picked up a real firearm');
 assert.equal(looted.snapshot.me.weapons[gun].ammo,R.weapons[gun].mag);
-// Back to the spawn lane, which has clear line of sight straight down the z axis to Bravo.
-const home=await walkTo(one,first.id,{x:spawn.x,z:spawn.z},seq,2.5);
-assert.ok(home,'player one walked back to the spawn lane');
-{ const players=latest(one,m=>m.type==='state').snapshot.players;
-  const me=players.find(p=>p.id===first.id),foe=players.find(p=>p.id===second.id);
-  assert.ok(W.visible({x:me.x,y:1.7,z:me.z},{x:foe.x,y:.84,z:foe.z}),'the spawn lane gives a clear shot at Bravo'); }
 clearInterval(beats[0]);one.ws.terminate();const again=client(b.url);await again.opened;const revived=setInterval(()=>again.send({type:'ping',at:Date.now()}),1200);t.after(()=>clearInterval(revived));
 again.send({type:'reconnect',room:first.room,id:first.id,token:first.token});const resumed=await again.wait(m=>m.type==='joined');assert.equal(resumed.id,first.id);
 const restored=await again.wait(m=>m.type==='state'&&m.snapshot.me.equipped===gun,12000);assert.equal(restored.snapshot.me.weapons[gun].ammo,R.weapons[gun].mag,'reconnect keeps the magazine');
 const attack=client(a.url);await attack.opened;attack.send({type:'reconnect',room:first.room,id:first.id,token:'0'.repeat(48)});assert.match((await attack.wait(m=>m.type==='error')).message,/재접속/);attack.ws.close();
 // Aim from the live positions: a metre of drift at 100m is a clean miss past a 0.3m hitbox.
-// The map hands out whatever it hands out; a short-range gun has to close the distance first.
-{ const players=latest(again,m=>m.type==='state')?.snapshot.players||[];
+// Drops are on opposite sides of a 208m field full of cover, so close in until the shot is real.
+const inSight=()=>{const players=latest(again,m=>m.type==='state')?.snapshot.players||[];
   const me=players.find(p=>p.id===first.id),foe=players.find(p=>p.id===second.id);
-  if(me&&foe&&Math.hypot(foe.x-me.x,foe.z-me.z)>R.weapons[gun].range*.85){
-    await walkTo(again,first.id,state=>{const t=state.players.find(p=>p.id===second.id);const s=state.players.find(p=>p.id===first.id);
-      const span=Math.hypot(t.x-s.x,t.z-s.z),step=R.weapons[gun].range*.6;
-      return{x:t.x+(s.x-t.x)/span*step,z:t.z+(s.z-t.z)/span*step}},seq,4);
-  } }
+  return !!(me&&foe&&W.visible({x:me.x,y:1.7,z:me.z},{x:foe.x,y:.84,z:foe.z}))};
+// Stand off on an arc around Bravo, tightening the circle until nothing is in the way.
+const closeIn=(angle,distance)=>walkTo(again,first.id,state=>{
+  const foe=state.players.find(p=>p.id===second.id),me=state.players.find(p=>p.id===first.id);
+  if(!foe||!me)return null;
+  const bearing=Math.atan2(me.x-foe.x,me.z-foe.z)+angle;
+  return{x:foe.x+Math.sin(bearing)*distance,z:foe.z+Math.cos(bearing)*distance}},seq,3);
+for(const[angle,distance]of [[0,20],[0,11],[.8,9],[-.8,9],[0,6],[1.6,6]]){
+  await closeIn(angle,distance);
+  if(inSight())break;
+}
+assert.ok(inSight(),'player one closed to a firing position with line of sight');
 let fired=0;
 while(fired<60&&!latest(again,m=>m.type==='state')?.snapshot.winner){
   const players=latest(again,m=>m.type==='state')?.snapshot.players||[];

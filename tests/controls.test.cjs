@@ -20,3 +20,66 @@ test('layout drag can finish outside the control when capture is unavailable',()
  assert.doesNotThrow(()=>node.events.pointerdown(event));for(const fn of t.listeners.pointermove)fn({...event,clientX:430});for(const fn of t.listeners.pointerup)fn(event);
  const at=node.style.left;for(const fn of t.listeners.pointermove)fn({...event,clientX:500});assert.equal(node.style.left,at);
 });
+
+const press=(t,code)=>{for(const fn of t.listeners.keydown||[])fn({code,preventDefault(){},stopImmediatePropagation(){}})};
+const bind=(t,action,code)=>{t.els['bind-'+action].onclick();press(t,code)};
+
+test('pickup sits on F and the pouch on 4/5/6 out of the box',()=>{
+ const t=setup();
+ assert.equal(t.controls.code('collect'),'KeyF');
+ assert.equal(t.controls.code('heal'),'Digit4');
+ assert.equal(t.controls.code('flash'),'Digit5');
+ assert.equal(t.controls.code('frag'),'Digit6');
+ assert.deepEqual(['fists','melee','gun'].map(a=>t.controls.code(a)),['Digit1','Digit2','Digit3']);
+ assert.deepEqual(['forward','left','back','right','sprint'].map(a=>t.controls.code(a)),['KeyW','KeyA','KeyS','KeyD','ShiftLeft']);
+ assert.equal(t.controls.keyLabel('heal'),'4');
+ assert.equal(t.controls.keyLabel('sprint'),'Shift');
+ assert.equal(t.controls.actionFor('KeyF'),'collect');
+ assert.equal(t.controls.actionFor('Digit4'),'heal');
+ assert.equal(t.controls.actionFor('KeyP'),null);
+});
+
+test('every action rebinds, movement included, and a key is never shared',()=>{
+ const t=setup();t.els['open-controls'].onclick();
+ bind(t,'collect','KeyG');
+ assert.equal(t.controls.code('collect'),'KeyG');
+ assert.equal(t.controls.actionFor('KeyG'),'collect');
+ assert.equal(t.controls.actionFor('KeyF'),null,'the old key is released');
+ // Movement is a binding like any other.
+ bind(t,'forward','ArrowUp');
+ assert.equal(t.controls.code('forward'),'ArrowUp');
+ assert.equal(t.controls.keyLabel('forward'),'↑');
+ // A key already in use is refused, and the action keeps what it had.
+ bind(t,'reload','ArrowUp');
+ assert.equal(t.controls.code('reload'),'KeyR');
+ assert.match(t.els['control-feedback'].textContent,/이미/);
+ // So is a key the game cannot read.
+ bind(t,'reload','F5');
+ assert.equal(t.controls.code('reload'),'KeyR');
+ // Escape backs out without changing anything.
+ t.els['bind-reload'].onclick();press(t,'Escape');
+ assert.equal(t.controls.code('reload'),'KeyR');
+ // Choices survive a reload of the page, and the keys-only reset puts them back.
+ assert.equal(setup(t.storage).controls.code('collect'),'KeyG');
+ t.els['reset-keys'].onclick();
+ assert.equal(t.controls.code('collect'),'KeyF');
+ assert.equal(t.controls.code('forward'),'KeyW');
+});
+
+test('a tampered or clashing saved binding falls back to the defaults',()=>{
+ const clash=JSON.stringify({keys:{collect:'KeyR',reload:'KeyR'}});
+ assert.equal(setup({'last-field-controls-v2':clash}).controls.code('collect'),'KeyF');
+ const junk=JSON.stringify({keys:{collect:'Escape',heal:42}});
+ const t=setup({'last-field-controls-v2':junk});
+ assert.equal(t.controls.code('collect'),'KeyF');
+ assert.equal(t.controls.code('heal'),'Digit4');
+});
+
+test('the throwable buttons join the touch layout and stay on screen',()=>{
+ const t=setup();
+ for(const[width,height]of [[390,844],[844,390]]){
+  t.scope.innerWidth=width;t.scope.innerHeight=height;for(const fn of t.listeners.resize)fn();
+  for(const id of ['flash','frag']){const n=t.els[id],r=parseFloat(n.style.width)/2,x=parseFloat(n.style.left),y=parseFloat(n.style.top);
+   assert.ok(x-r>=0&&x+r<=width,id+' horizontal');assert.ok(y-r>=0&&y+r<=height,id+' vertical')}
+ }
+});

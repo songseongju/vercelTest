@@ -7,25 +7,32 @@ const B=BABYLON,V=B.Vector3,C=B.Color3;const mobileDevice=matchMedia('(pointer:c
 try{engine=new B.Engine(canvas,highQuality,{stencil:false,powerPreference:mobileDevice?'default':'high-performance'});scene=new B.Scene(engine)}catch(error){startupFailure('3D 화면을 시작할 수 없습니다. 실행 진단에서 3D 기능을 확인해 주세요.',error);return}
 function quality(){const dpr=Math.min(window.devicePixelRatio||1,highQuality?(mobileDevice?1.25:2):1);scene.shadowsEnabled=highQuality;fieldEnvironment?.quality(highQuality);engine.setHardwareScalingLevel(1/dpr);$('quality').textContent=highQuality?'화질: 선명':'화질: 성능';engine.resize()}
 quality();$('quality').onclick=()=>{highQuality=!highQuality;quality()};
-scene.clearColor=new B.Color4(.54,.62,.67,1);scene.fogMode=B.Scene.FOGMODE_LINEAR;scene.fogStart=75;scene.fogEnd=220;scene.fogColor=new C(.62,.67,.68);scene.skipPointerMovePicking=true;
+scene.clearColor=new B.Color4(.54,.62,.67,1);scene.fogMode=B.Scene.FOGMODE_LINEAR;scene.fogStart=135;scene.fogEnd=620;scene.fogColor=new C(.62,.67,.68);scene.skipPointerMovePicking=true;
 scene.imageProcessingConfiguration.toneMappingEnabled=true;scene.imageProcessingConfiguration.toneMappingType=B.ImageProcessingConfiguration.TONEMAPPING_ACES;scene.imageProcessingConfiguration.contrast=1.08;scene.imageProcessingConfiguration.exposure=1.15;
-const camera=new B.FreeCamera('player',new V(-11,6,-61),scene);camera.minZ=.06;camera.maxZ=320;camera.fov=1.08;camera.rotation.set(.05,.28,0);scene.activeCamera=camera;
+const camera=new B.FreeCamera('player',new V(-11,6,-61),scene);camera.minZ=.06;camera.maxZ=700;camera.fov=1.08;camera.rotation.set(.05,.28,0);scene.activeCamera=camera;
 // `camera` stays the player's eye and keeps driving movement, aiming and every gameplay query.
 // Third person only swaps which camera renders, so the authoritative shot ray never changes.
-const viewCam=new B.FreeCamera('shoulder',new V(-11,6,-61),scene);viewCam.minZ=.06;viewCam.maxZ=320;viewCam.fov=1.08;
+const viewCam=new B.FreeCamera('shoulder',new V(-11,6,-61),scene);viewCam.minZ=.06;viewCam.maxZ=700;viewCam.fov=1.08;
 let thirdPerson=false,selfBody=null,netMoving=false;
 const sky=new B.HemisphericLight('daylight',new V(0,1,0),scene);sky.intensity=.32;sky.diffuse=new C(.8,.87,1);sky.groundColor=new C(.19,.18,.15);
-const sun=new B.DirectionalLight('sun',new V(-.6,-1,.4),scene);sun.position.set(40,65,-40);sun.intensity=2.1;sun.diffuse=new C(1,.91,.77);sun.autoCalcShadowZBounds=true;
-const shadow=new B.ShadowGenerator(mobileDevice||boot?.safe?512:2048,sun);shadow.usePercentageCloserFiltering=true;shadow.filteringQuality=B.ShadowGenerator.QUALITY_LOW;shadow.bias=.0015;shadow.normalBias=.035;
+const sun=new B.DirectionalLight('sun',new V(-.6,-1,.4),scene);sun.position.set(40,65,-40);sun.intensity=2.1;sun.diffuse=new C(1,.91,.77);
+// A 208m field cannot afford a shadow pass over the whole map: keep a tight box around the player
+// so everything else is frustum-culled out of the shadow render.
+sun.autoUpdateExtends=false;sun.autoCalcShadowZBounds=false;sun.shadowMinZ=1;sun.shadowMaxZ=190;
+for(const [key,value] of [['orthoLeft',-42],['orthoRight',42],['orthoTop',42],['orthoBottom',-42]])sun[key]=value;
+function followSun(target){sun.position.set(target.x+50,84,target.z-34)}
+const shadow=new B.ShadowGenerator(mobileDevice||boot?.safe?512:1024,sun);shadow.usePercentageCloserFiltering=true;shadow.filteringQuality=B.ShadowGenerator.QUALITY_LOW;shadow.bias=.0015;shadow.normalBias=.035;
 function mat(name,hex,emission=0){const m=new B.StandardMaterial(name,scene);m.diffuseColor=C.FromHexString(hex);m.specularColor=new C(.08,.08,.08);if(emission)m.emissiveColor=m.diffuseColor.scale(emission);m.freeze();return m}
 const M={grass:mat('grass','#7c925b'),road:mat('road','#737b7a'),concrete:mat('concrete','#c5c6b5'),cream:mat('plaster','#e7dfc4'),roof:mat('roof','#567c85'),dark:mat('gunmetal','#26333b'),steel:mat('steel','#637885'),wood:mat('wood','#a67c4d'),leaf:mat('leaf','#557b45'),leaf2:mat('leaf light','#769954'),bark:mat('bark','#806c4c'),yellow:mat('paint','#f2c660'),white:mat('white','#f0f1e3'),skin:mat('skin','#cda17f'),cloth:mat('enemy jacket','#bb7b4e'),pants:mat('enemy pants','#4b6056'),helmet:mat('helmet','#626e54'),glass:mat('glass','#456c7b'),ammo:mat('ammo','#dbb351',.15),med:mat('medical','#6bb4a2',.1),armor:mat('armor','#75bada',.1),purple:mat('rare','#b599d2',.15),flash:mat('muzzle','#ffe2a6',1.4)};
 fieldEnvironment=window.createFieldEnvironment(B,scene,shadow,mobileDevice||boot?.safe);Object.assign(M,fieldEnvironment.materials);fieldEnvironment.quality(highQuality);
-for(const [key,color,metal,rough]of [['dark','#353b40',.8,.36],['steel','#929b9d',.8,.43],['glass','#263b43',.65,.2]]){const m=new B.PBRMaterial(key,scene);m.albedoColor=C.FromHexString(color);m.metallic=metal;m.roughness=rough;M[key]=m}
+for(const [key,color,metal,rough]of [['dark','#353b40',.8,.36],['steel','#929b9d',.8,.43],['glass','#263b43',.65,.2],['puddle','#2e3a38',.12,.06]]){const m=new B.PBRMaterial(key,scene);m.albedoColor=C.FromHexString(color);m.metallic=metal;m.roughness=rough;M[key]=m}
 const obstacles=[],staticHits=new Set(),enemies=[],loot=[],effects=[],grenades=[];
 // Blast visuals animate their own alpha, so each one owns a throwaway material.
 function glow(name,hex,power){const m=new B.StandardMaterial(name,scene);m.diffuseColor=C.FromHexString(hex);m.emissiveColor=C.FromHexString(hex).scale(power);m.specularColor=new C(0,0,0);m.disableLighting=true;m.backFaceCulling=false;m.alpha=.9;return m}
 function stepEffects(dt){for(let i=effects.length-1;i>=0;i--){const fx=effects[i];fx.life-=dt;fx.update?.(fx,dt);if(fx.life<=0){fx.mesh.dispose(false,!!fx.own);effects.splice(i,1)}}}
-function box(name,x,y,z,w,h,d,m,solid=false,casts=true){const a=B.MeshBuilder.CreateBox(name,{width:w,height:h,depth:d},scene);a.position.set(x,y,z);a.material=m;fieldEnvironment.mapBox(a);a.receiveShadows=true;a.isPickable=solid;if(solid){obstacles.push({x,z,w:w/2,d:d/2});staticHits.add(a)}if(casts)shadow.addShadowCaster(a);return a}
+// Trim that neither stops a bullet nor casts a shadow is batched later into a handful of meshes.
+const decor=[];let batching=true;
+function box(name,x,y,z,w,h,d,m,solid=false,casts=true){const a=B.MeshBuilder.CreateBox(name,{width:w,height:h,depth:d},scene);a.position.set(x,y,z);a.material=m;fieldEnvironment.mapBox(a);a.receiveShadows=true;a.isPickable=solid;if(solid){obstacles.push({x,z,w:w/2,d:d/2});staticHits.add(a)}if(casts)shadow.addShadowCaster(a);else if(batching&&!solid)decor.push(a);return a}
 function occlude(m){m.isPickable=true;staticHits.add(m);return m}
 function cylinder(name,x,y,z,d,h,m){const a=B.MeshBuilder.CreateCylinder(name,{diameter:d,height:h,tessellation:10},scene);a.position.set(x,y,z);a.material=m;a.isPickable=false;shadow.addShadowCaster(a);return a}
 function label(text,x,y,z,w=4,h=1,color='#263b42',rotation=0){const t=new B.DynamicTexture('sign',{width:512,height:128},scene,false);t.hasAlpha=true;const c=t.getContext();c.clearRect(0,0,512,128);c.fillStyle=color;c.font='bold 56px Arial';c.textAlign='center';c.fillText(text,256,84);t.update();const m=new B.StandardMaterial('sign',scene);m.diffuseTexture=t;m.opacityTexture=t;m.emissiveColor=new C(.25,.25,.25);m.backFaceCulling=false;const a=B.MeshBuilder.CreatePlane('sign',{width:w,height:h},scene);a.position.set(x,y,z);a.rotation.y=rotation;a.material=m;a.isPickable=false;return a}
@@ -34,7 +41,9 @@ for(const [name,x,y,z,w,d] of [['main road',0,.002,0,12,212],['coast road',0,.00
 for(let z=-100;z<104;z+=8)box('lane paint',0,.026,z,.16,.018,3.4,M.yellow,false,false);
 for(let x=-100;x<104;x+=8)box('lane paint',x,.028,10,3.4,.018,.16,M.yellow,false,false);
 // Enterable structures: front doors and open interiors hold equipment.
-function building(x,z,w=10,d=10){box('foundation',x,.02,z,w+.4,.05,d+.4,M.concrete,false,false);box('rear wall',x,1.8,z+d/2,w,3.6,.35,M.cream,true);box('left wall',x-w/2,1.8,z,.35,3.6,d,M.cream,true);box('right wall',x+w/2,1.8,z,.35,3.6,d,M.cream,true);const piece=(w-3.6)/2;box('front left',x-(1.8+piece/2),1.8,z-d/2,piece,3.6,.35,M.cream,true);box('front right',x+(1.8+piece/2),1.8,z-d/2,piece,3.6,.35,M.cream,true);occlude(box('door lintel',x,3.3,z-d/2,3.6,.6,.35,M.cream,false));const roof=box('flat roof',x,3.75,z,w+1,.28,d+1,M.roof,false);roof.isPickable=true;staticHits.add(roof);for(const side of [-1,1]){box('window',x+side*w*.3,2,z-d/2-.2,1.6,1.25,.025,M.glass,false,false);box('window sill',x+side*w*.3,1.32,z-d/2-.25,1.9,.15,.2,M.concrete)}for(const side of [-1,1]){const wx=x+side*w*.3;for(const dx of [-.85,.85])box('window frame',wx+dx,2,z-d/2-.24,.065,1.36,.09,M.steel,false,false);for(const yy of [1.35,2.65])box('window frame',wx,yy,z-d/2-.24,1.76,.06,.09,M.steel,false,false);box('window mullion',wx,2,z-d/2-.26,.055,1.3,.04,M.steel,false,false);box('concrete footing',x+side*(w/2-.08),.22,z,.46,.42,d,M.concrete,false,false)}
+const wallTints=['#d0cbc0','#c6bda8','#bdc2bb','#d6c7ac','#b9b3a6'].map((tint,i)=>fieldEnvironment.surface('hut plaster '+i,'concrete',3,tint));
+let hutIndex=0;
+function building(x,z,w=10,d=10){const wall=wallTints[hutIndex++%wallTints.length];box('foundation',x,.02,z,w+.4,.05,d+.4,M.concrete,false,false);box('rear wall',x,1.8,z+d/2,w,3.6,.35,wall,true);box('left wall',x-w/2,1.8,z,.35,3.6,d,wall,true);box('right wall',x+w/2,1.8,z,.35,3.6,d,wall,true);const piece=(w-3.6)/2;box('front left',x-(1.8+piece/2),1.8,z-d/2,piece,3.6,.35,wall,true);box('front right',x+(1.8+piece/2),1.8,z-d/2,piece,3.6,.35,wall,true);occlude(box('door lintel',x,3.3,z-d/2,3.6,.6,.35,wall,false));const roof=box('flat roof',x,3.75,z,w+1,.28,d+1,M.roof,false);roof.isPickable=true;staticHits.add(roof);for(const side of [-1,1]){box('window',x+side*w*.3,2,z-d/2-.2,1.6,1.25,.025,M.glass,false,false);box('window sill',x+side*w*.3,1.32,z-d/2-.25,1.9,.15,.2,M.concrete)}for(const side of [-1,1]){const wx=x+side*w*.3;for(const dx of [-.85,.85])box('window frame',wx+dx,2,z-d/2-.24,.065,1.36,.09,M.steel,false,false);for(const yy of [1.35,2.65])box('window frame',wx,yy,z-d/2-.24,1.76,.06,.09,M.steel,false,false);box('window mullion',wx,2,z-d/2-.26,.055,1.3,.04,M.steel,false,false);box('concrete footing',x+side*(w/2-.08),.22,z,.46,.42,d,M.concrete,false,false)}
 box('roof fascia',x,3.72,z-d/2-.5,w+1,.2,.12,M.steel,false,false);
 for(const side of [-1,1]){const pipe=cylinder('drain pipe',x+side*(w/2+.13),1.8,z-d/2+.35,.11,3.6,M.steel);pipe.isPickable=false}
 box('door frame top',x,3.02,z-d/2-.2,3.75,.12,.14,M.steel,false,false);
@@ -143,13 +152,185 @@ function fence(x,z,w,d){
 }
 for(const args of W.fences)fence(...args);
 for(let i=0;i<20;i++){const a=i/20*Math.PI*2,r=205;const m=B.MeshBuilder.CreateSphere('distant ridge',{diameter:96,segments:16},scene);m.position.set(Math.sin(a)*r,-16,Math.cos(a)*r);m.scaling.set(1.45,.62+(i%3)*.16,1);m.material=M.grass;m.isPickable=false;m.receiveShadows=true}
+// Scrap and roadside furniture. Every solid piece here has a matching collider in shared/world.js.
+function wreck(x,z,w,d,kind,along){
+  const long=along?w:d,wide=along?d:w,shell=fieldEnvironment.surface('wreck paint','metal',2.4,kind==='truck'?'#7d6c52':kind==='van'?'#8b8478':'#6f5f5a',.45,.72);
+  const axis=(dx,dz)=>along?[dx,dz]:[dz,dx];
+  const put=(name,ox,y,oz,sw,h,sd,material,solid=false)=>{const[px,pz]=axis(ox,oz),[bw,bd]=axis(sw,sd);return box(name,x+px,y,z+pz,bw,h,bd,material,solid)};
+  occlude(put('chassis',0,.55,0,long*.96,.55,wide*.9,M.rust));
+  if(kind==='car'){
+    occlude(put('car body',0,1,0,long*.92,.62,wide*.88,shell));
+    occlude(put('cabin',-.1,1.5,0,long*.42,.42,wide*.78,M.glass));
+    put('bonnet',long*.34,1.24,0,long*.26,.12,wide*.84,shell);
+  }else{
+    occlude(put('cab',long*.32,1.35,0,long*.3,1.1,wide*.9,shell));
+    occlude(put('cargo box',-long*.16,1.55,0,long*.6,1.5,wide*.94,kind==='truck'?M.rust:shell));
+    put('windscreen',long*.46,1.6,0,.1,.55,wide*.72,M.glass);
+    for(let i=0;i<4;i++)put('box rib',-long*.42+i*long*.16,1.55,wide*.48,.09,1.4,.06,M.dark);
+  }
+  for(const sx of [-1,1])for(const sz of [-1,1]){
+    const[px,pz]=axis(sx*long*.34,sz*wide*.42);
+    const wheel=B.MeshBuilder.CreateCylinder('wheel',{diameter:.86,height:.3,tessellation:12},scene);
+    wheel.position.set(x+px,.38,z+pz);wheel.rotation.z=Math.PI/2;if(!along)wheel.rotation.y=Math.PI/2;
+    wheel.material=M.dark;wheel.isPickable=false;shadow.addShadowCaster(wheel);
+  }
+  if(detail){put('bumper',long*.5,.75,0,.14,.3,wide*.9,M.steel);put('rear bumper',-long*.5,.7,0,.14,.26,wide*.86,M.steel)}
+}
+for(const args of W.wrecks)wreck(...args);
+function drum(x,z,color){
+  const body=B.MeshBuilder.CreateCylinder('oil drum',{diameter:.86,height:1.1,tessellation:14},scene);
+  body.position.set(x,.55,z);body.material=fieldEnvironment.surface('drum paint','metal',1.2,color,.4,.7);
+  body.isPickable=true;staticHits.add(body);body.receiveShadows=true;shadow.addShadowCaster(body);
+  for(const y of [.32,.78]){const hoop=B.MeshBuilder.CreateTorus('drum hoop',{diameter:.9,thickness:.05,tessellation:14},scene);hoop.position.set(x,y,z);hoop.material=M.dark;hoop.isPickable=false}
+  box('drum lid',x,1.12,z,.8,.05,.8,M.steel,false,false);
+}
+for(const args of W.drums)drum(...args);
+function palletStack(x,z,h){
+  const levels=Math.max(1,Math.round(h/.28));
+  for(let i=0;i<levels;i++){
+    const y=.09+i*.28;
+    box('pallet deck',x,y+.11,z,1.3,.07,1.1,M.wood,i===0,false).receiveShadows=true;
+    for(const ox of [-.5,0,.5])box('pallet block',x+ox,y,z,.22,.14,1.05,M.wood,false,false);
+  }
+  const hit=box('pallet stack',x,h/2,z,1.35,h,1.15,M.wood,true,false);hit.visibility=0;
+  if(detail)box('shrink wrap',x,h+.2,z,1.15,.36,.95,M.glass,false,false);
+}
+for(const args of W.pallets)palletStack(...args);
+function tyreStack(x,z,count){
+  for(let i=0;i<count;i++){
+    const tyre=B.MeshBuilder.CreateTorus('tyre',{diameter:.94,thickness:.28,tessellation:14},scene);
+    tyre.position.set(x+(i%2?.04:-.03),.16+i*.28,z+(i%2?-.03:.04));tyre.rotation.x=Math.PI/2;tyre.rotation.y=i*.7;
+    tyre.material=M.dark;tyre.isPickable=false;tyre.receiveShadows=true;shadow.addShadowCaster(tyre);
+  }
+  const hit=box('tyre stack',x,count*.14,z,1.12,count*.28,1.12,M.dark,true,false);hit.visibility=0;
+}
+for(const args of W.tyres)tyreStack(...args);
+// Utility poles carry the skyline; the catenary between them is one merged, unpickable mesh.
+const cableSag=[];
+function pole(x,z){
+  occlude(box('utility pole',x,4.4,z,.36,8.8,.36,M.bark,true,false));
+  box('crossarm',x,8.1,z,2.6,.16,.18,M.bark,false,false);
+  for(const ox of [-1.1,0,1.1]){const insulator=B.MeshBuilder.CreateCylinder('insulator',{diameter:.14,height:.2,tessellation:8},scene);insulator.position.set(x+ox,8.3,z);insulator.material=M.glass;insulator.isPickable=false}
+  if(detail)for(let i=0;i<4;i++)box('pole step',x+(i%2?.24:-.24),2+i*.9,z,.5,.06,.06,M.steel,false,false);
+}
+for(const args of W.poles)pole(...args);
+function cables(list,vertical){
+  for(let i=0;i<list.length-1;i++){
+    const a=list[i],b=list[i+1];
+    if(Math.hypot(a[0]-b[0],a[1]-b[1])>34)continue;
+    for(const ox of [-1.1,0,1.1]){
+      const points=[];
+      for(let t=0;t<=8;t++){const f=t/8;
+        points.push(new V(a[0]+(b[0]-a[0])*f+(vertical?ox:0),8.3-Math.sin(f*Math.PI)*.85,a[1]+(b[1]-a[1])*f+(vertical?0:ox)));
+      }
+      const line=B.MeshBuilder.CreateLines('power line',{points},scene);line.color=new C(.16,.18,.19);line.isPickable=false;cableSag.push(line);
+    }
+  }
+}
+cables(W.poles.filter(p=>p[0]===-8.6),true);cables(W.poles.filter(p=>p[1]===20.6),false);
+function lamp(x,z,side){
+  occlude(box('lamp column',x,3,z,.24,6,.24,M.steel,true,false));
+  box('lamp arm',x-side*.7,5.95,z,1.5,.16,.16,M.steel,false,false);
+  const head=box('lamp head',x-side*1.4,5.8,z,.9,.22,.36,M.dark,false,false);head.receiveShadows=false;
+  box('lamp lens',x-side*1.4,5.66,z,.8,.06,.3,M.flash,false,false);
+}
+for(const args of W.lamps)lamp(...args);
+function guardRail(x,z,w,d){
+  const along=w>d,span=along?w:d;
+  box('rail beam',x,.78,z,along?w:.12,.32,along?.12:d,M.steel,false,false);
+  box('rail beam',x,.46,z,along?w:.12,.24,along?.12:d,M.steel,false,false);
+  for(let i=0;i<=Math.round(span/2.6);i++){const t=i/Math.round(span/2.6)-.5;box('rail post',x+(along?t*span:0),.45,z+(along?0:t*span),.14,.9,.14,M.steel,false,false)}
+  const hit=box('rail body',x,.6,z,w,1.2,d,M.steel,true,false);hit.visibility=0;
+}
+for(const args of W.rails)guardRail(...args);
+// Cargo containers get doors, so both ends read differently at a distance.
+for(const [cx,cz,cw,cd] of W.cargos){
+  const along=cw>cd,doorZ=along?cz:cz-cd/2-.06,doorX=along?cx-cw/2-.06:cx;
+  for(const s of [-1,1])box('container door',doorX,1.5,doorZ,along?.06:cw*.46,2.7,along?cd*.46:.06,M.steel,false,false).position[along?'z':'x']+=s*(along?cd:cw)*.24;
+  for(const s of [-1,1]){const bar=B.MeshBuilder.CreateCylinder('door bar',{diameter:.09,height:2.6,tessellation:8},scene);bar.position.set(doorX+(along?-.08:s*cw*.2),1.5,doorZ+(along?s*cd*.2:-.08));bar.material=M.dark;bar.isPickable=false}
+}
+// --- surface wear and ground cover: dense visual detail that blocks nothing ---
+(function dressGround(){
+  // Skipped wholesale when the environment pack is unavailable, and thinned out on phones.
+  if(!(M.dirt&&M.gravel&&M.mud&&M.puddle))return;
+  const density=detail?1:.4;
+  let seed=20260917;const rnd=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
+  const groups=new Map();
+  const patch=(material,x,z,w,d,y)=>{const m=box('ground wear',x,y,z,w,.04,d,material,false,false);m.receiveShadows=true;
+    const key=material.name+'|'+(Math.floor((x+104)/70)*4+Math.floor((z+104)/70));(groups.get(key)||groups.set(key,[]).get(key)).push(m)};
+  // Worn earth around everything players walk to, gravel hardstanding at the compounds.
+  for(const [x,z] of [...W.buildings,...W.depots,...W.towers,...W.cargos]){
+    patch(M.gravel,x,z,14+rnd()*10,13+rnd()*9,.014);
+    for(let i=0;i<3;i++)patch(M.dirt,x+(rnd()-.5)*22,z+(rnd()-.5)*22,4+rnd()*9,4+rnd()*9,.02);
+  }
+  for(let i=0;i<Math.round(90*density);i++){const x=(rnd()*2-1)*100,z=(rnd()*2-1)*100;patch(M.dirt,x,z,3+rnd()*11,3+rnd()*11,.018)}
+  // Ruts either side of the two main roads, and standing water in the low spots.
+  for(let i=0;i<46;i++){const z=-100+i*4.4;for(const x of [-3.4,3.4])patch(M.mud,x+(rnd()-.5)*.6,z,.55,4.2,.024)}
+  for(let i=0;i<40;i++){const x=-100+i*5;for(const z of [6.6,13.4])patch(M.mud,x,z+(rnd()-.5)*.6,4.4,.55,.026)}
+  for(let i=0;i<Math.round(26*density);i++){const x=(rnd()*2-1)*96,z=(rnd()*2-1)*96;if(W.blocked(x,z,1))continue;
+    const pool=box('standing water',x,.03,z,1.6+rnd()*3.4,.03,1.4+rnd()*3,M.puddle,false,false);pool.receiveShadows=true;
+    const key='puddle|'+(Math.floor((x+104)/70)*4+Math.floor((z+104)/70));(groups.get(key)||groups.set(key,[]).get(key)).push(pool)}
+  for(const [key,list] of groups){if(list.length<2)continue;const merged=B.Mesh.MergeMeshes(list,true,true,undefined,false,false);if(merged){merged.name='ground wear '+key;merged.isPickable=false;merged.receiveShadows=true;merged.alwaysSelectAsActiveMesh=false}}
+  // Dry grass clumps: crossed alpha cards, merged into spatial chunks so culling still works.
+  const cover=fieldEnvironment.groundCover,chunks=new Map();
+  if(cover)for(let i=0;i<Math.round(1500*density);i++){
+    const x=(rnd()*2-1)*102,z=(rnd()*2-1)*102;
+    if(Math.hypot(x,z)<6||W.blocked(x,z,1.1))continue;
+    if(Math.abs(x)<7||(z>4&&z<16))continue;
+    const scale=.55+rnd()*.6;
+    for(let card=0;card<2;card++){
+      const tuft=B.MeshBuilder.CreatePlane('grass tuft',{width:.9*scale,height:.46*scale},scene);
+      tuft.position.set(x,.22*scale,z);tuft.rotation.y=rnd()*Math.PI+card*Math.PI/2;
+      const key=Math.floor((x+104)/34)*7+Math.floor((z+104)/34);
+      (chunks.get(key)||chunks.set(key,[]).get(key)).push(tuft);
+    }
+  }
+  for(const [key,list] of chunks){const merged=B.Mesh.MergeMeshes(list,true,true,undefined,false,false);
+    if(merged){merged.name='ground cover '+key;merged.material=cover;merged.isPickable=false;merged.receiveShadows=true}}
+  // Low scrub against walls and rocks fills the join between props and the ground.
+  const bushes=[];
+  if(cover)for(let i=0;i<Math.round(150*density);i++){
+    const x=(rnd()*2-1)*100,z=(rnd()*2-1)*100;
+    if(W.blocked(x,z,1.3)||!W.blocked(x,z,4.5))continue;
+    const size=.9+rnd()*.7;
+    for(let card=0;card<3;card++){
+      const leaf=B.MeshBuilder.CreatePlane('scrub',{width:1.5*size,height:.8*size},scene);
+      leaf.position.set(x,.38*size,z);leaf.rotation.y=card*Math.PI/3+rnd();bushes.push(leaf);
+    }
+  }
+  if(bushes.length>1){const merged=B.Mesh.MergeMeshes(bushes,true,true,undefined,false,false);
+    if(merged){
+      // Share the blade sheet rather than cloning it: a cloned dynamic texture never reports ready.
+      const scrub=new B.StandardMaterial('dusty scrub',scene);
+      scrub.diffuseTexture=cover.diffuseTexture;scrub.useAlphaFromDiffuseTexture=true;
+      scrub.transparencyMode=B.Material.MATERIAL_ALPHATEST;scrub.alphaCutOff=.42;
+      scrub.backFaceCulling=false;scrub.twoSidedLighting=true;scrub.specularColor=new C(0,0,0);scrub.diffuseColor=new C(.74,.78,.56);
+      merged.name='scrub line';merged.material=scrub;merged.isPickable=false;merged.receiveShadows=true}}
+})();
 fieldEnvironment.quality(highQuality);
+// One draw call per material per 48m cell beats several thousand little ones.
+(function batchDecor(){
+  const groups=new Map();
+  for(const mesh of decor){
+    if(mesh.parent||mesh.isDisposed()||!mesh.material)continue;
+    const key=mesh.material.uniqueId+'|'+Math.floor((mesh.position.x+120)/48)+'|'+Math.floor((mesh.position.z+120)/48);
+    (groups.get(key)||groups.set(key,[]).get(key)).push(mesh);
+  }
+  for(const list of groups.values()){
+    if(list.length<3)continue;
+    const merged=B.Mesh.MergeMeshes(list,true,true,undefined,false,false);
+    if(merged){merged.name='field trim';merged.isPickable=false;merged.receiveShadows=true}
+  }
+  decor.length=0;batching=false;
+})();
+// Nothing built so far ever moves, so stop recomputing its world matrix every frame.
+for(const mesh of scene.meshes)if(!mesh.parent&&!mesh.infiniteDistance)mesh.freezeWorldMatrix();
 // Blue field is a translucent volume with a bright ground boundary.
 const zoneMat=new B.StandardMaterial('blue field',scene);zoneMat.diffuseColor=new C(.15,.5,1);zoneMat.emissiveColor=new C(.08,.32,.9);zoneMat.alpha=.13;zoneMat.backFaceCulling=false;zoneMat.disableLighting=true;zoneMat.depthFunction=B.Constants.LEQUAL;
 const wall=B.MeshBuilder.CreateCylinder('zone wall',{diameter:2,height:22,tessellation:96,cap:B.Mesh.NO_CAP,sideOrientation:B.Mesh.DOUBLESIDE},scene);wall.position.y=11;wall.material=zoneMat;wall.isPickable=false;
 function ring(name,color){const points=[];for(let i=0;i<=128;i++){const a=i/128*Math.PI*2;points.push(new V(Math.sin(a),.075,Math.cos(a)))}const m=B.MeshBuilder.CreateLines(name,{points},scene);m.color=color;m.isPickable=false;return m}
 const zoneRing=ring('current circle',new C(.15,.55,1)),nextRing=ring('next circle',new C(1,1,.92));
-function blocked(x,z,r=.4){if(Math.abs(x)>68-r||Math.abs(z)>68-r)return true;return obstacles.some(o=>Math.abs(x-o.x)<o.w+r&&Math.abs(z-o.z)<o.d+r)}
+function blocked(x,z,r=.4){if(Math.abs(x)>W.EDGE-r||Math.abs(z)>W.EDGE-r)return true;return obstacles.some(o=>Math.abs(x-o.x)<o.w+r&&Math.abs(z-o.z)<o.d+r)}
 function advance(p,dx,dz,r=.4){if(!blocked(p.x+dx,p.z,r))p.x+=dx;if(!blocked(p.x,p.z+dz,r))p.z+=dz}
 function visible(a,b){const delta=b.subtract(a),length=delta.length();if(length<.01)return true;const ray=new B.Ray(a,delta.scale(1/length),Math.max(0,length-.2));return !scene.pickWithRay(ray,m=>staticHits.has(m))?.hit}
 // A* on a shared collision grid keeps bots out of walls and sends them through doors.
@@ -173,7 +354,12 @@ function route(from,to){const s=cell(from),g=cell(to),startIdx=s.z*cols+s.x;let 
  return[]}
 
 const lootVisuals=window.createLootVisuals(B,scene,M);
-function lootItem(type,x,z,weapon=null,amount=60){const root=lootVisuals.create(type,weapon),color=type==='weapon'?(R.melee(weapon)?M.steel:weapon==='marksman'?M.purple:weapon==='smg'?M.armor:M.ammo):type==='helmet'?M.helmet:type==='vest'?M.armor:M[type]||M.ammo;root.position.set(x,0,z);const halo=B.MeshBuilder.CreateTorus('supply ground ring',{diameter:1.12,thickness:.023,tessellation:24},scene);halo.parent=root;halo.position.y=.04;halo.material=color;halo.isPickable=false;loot.push({type,x,z,weapon,amount,root,taken:false});return loot[loot.length-1]}
+function lootItem(type,x,z,weapon=null,amount=60){const root=lootVisuals.create(type,weapon),color=type==='weapon'?(R.melee(weapon)?M.steel:weapon==='marksman'?M.purple:weapon==='smg'?M.armor:M.ammo):type==='helmet'?M.helmet:type==='vest'?M.armor:M[type]||M.ammo;
+const halo=B.MeshBuilder.CreateTorus('supply ground ring',{diameter:1.12,thickness:.023,tessellation:24},scene);halo.parent=root;halo.position.y=.04;halo.material=color;halo.isPickable=false;
+// A pickup is scenery, never a hit target, so collapse it to a single draw before it is placed.
+const parts=root.getChildMeshes();
+if(parts.length>1){const merged=B.Mesh.MergeMeshes(parts,true,true,undefined,false,true);if(merged){merged.name='supply drop '+type;merged.parent=root;merged.isPickable=false;merged.receiveShadows=true;shadow.addShadowCaster(merged)}}
+root.position.set(x,0,z);loot.push({type,x,z,weapon,amount,root,taken:false});return loot[loot.length-1]}
 function populateLoot(spawn){for(const l of loot)l.root.dispose();loot.length=0;for(const item of W.loot()){const l=lootItem(item.type,item.x,item.z,item.weapon,item.amount);l.id=item.id}
 if(!spawn)return;
 // Solo gets the same guaranteed cache as an online round: a run away, in a direction that changes every time.
@@ -373,6 +559,7 @@ function outroTick(dt){
     viewCam.setTarget(new V(c.x,1.1,c.z));viewCam.fov=1.02;
     if(t>outro.next){outro.next=t+.11;flare(c)}
   }
+  followSun(c);
   if(scene.activeCamera!==viewCam)scene.activeCamera=viewCam;
   if(player.blind>0){player.blind=Math.max(0,player.blind-dt);$('flashwash').style.opacity=String(Math.min(1,player.blind/1.6))}
   stepEffects(dt);
@@ -391,7 +578,7 @@ const map=$('minimap').getContext('2d');function drawMap(){const size=320,s=size
 for(const[x,z,w,d]of [[0,0,12,212],[0,10,212,10],[-56,0,8,212],[56,0,8,212],[0,-62,212,8],[0,64,212,8]])map.fillRect(c+(x-w/2)*s,c-(z+d/2)*s,w*s,d*s);map.fillStyle='#b3b7a6';for(const o of obstacles)map.fillRect(c+(o.x-o.w)*s,c-(o.z+o.d)*s,o.w*2*s,o.d*2*s);map.fillStyle='#196ccf50';map.beginPath();map.rect(0,0,size,size);map.arc(c,c,Math.max(0,zone.radius*s),0,Math.PI*2,true);map.fill('evenodd');map.strokeStyle='#68b7ff';map.lineWidth=3;map.beginPath();map.arc(c,c,Math.max(0,zone.radius*s),0,Math.PI*2);map.stroke();map.strokeStyle='#fff';map.lineWidth=2;map.setLineDash([7,5]);map.beginPath();map.arc(c,c,Math.max(0,zone.target*s),0,Math.PI*2);map.stroke();map.setLineDash([]);for(const l of loot)if(!l.taken){map.fillStyle=l.type==='weapon'?'#f5c65c':l.type==='frag'||l.type==='flash'?'#9fe08a':'#d5eadc';map.fillRect(c+l.x*s-1.5,c-l.z*s-1.5,3,3)}
 for(const g of grenades){map.fillStyle='#ff9c5c';map.fillRect(c+g.x*s-2,c-g.z*s-2,4,4)}map.save();map.translate(c+camera.position.x*s,c-camera.position.z*s);map.rotate(yaw);map.fillStyle='#fff';map.strokeStyle='#182b31';map.lineWidth=2;map.beginPath();map.moveTo(0,-9);map.lineTo(-6,6);map.lineTo(0,3);map.lineTo(6,6);map.closePath();map.fill();map.stroke();map.restore()}
 let soldierAssets=null,lobbySoldier=null,charactersReady=false;
-const VEST_REST=new V(0,1.29,0),HELMET_REST=new V(0,1.7,-.008);
+const VEST_REST=new V(0,1.3,0),HELMET_REST=new V(0,1.7,-.008);
 const corpses=[];
 function modelAnimation(e,name){if(e.motion===name)return;e.motion=name;for(const [key,a] of Object.entries(e.animations)){if(key===name){a.play(true);a.speedRatio=name==='Run'?1:name==='Walk'?1.25:1}else a.stop()}}
 // Gear is authored in root space and then carried by a bone, so a vest breathes with the chest
@@ -406,11 +593,14 @@ function socketTo(e,node,socket,offset,rootInverse){
   node.rotationQuaternion=socketRotation.clone();
   node.position.copyFrom(B.Vector3.TransformCoordinates(offset,m));
 }
-function updateWorld(node){for(const child of node.getDescendants(false))child.computeWorldMatrix(true);node.computeWorldMatrix(true)}
+function updateWorld(e){const nodes=e.nodes||(e.nodes=e.model.getDescendants(false));for(const child of nodes)child.computeWorldMatrix(true);e.model.computeWorldMatrix(true)}
 // Rotate joints in parent space, so the imported glTF coordinate conversion stays intact.
 function pointJoint(joint,child,target){const parent=joint.parent,inv=parent.getWorldMatrix().clone().invert();const origin=V.TransformCoordinates(joint.getAbsolutePosition(),inv),current=V.TransformCoordinates(child.getAbsolutePosition(),inv).subtract(origin).normalize(),desired=V.TransformCoordinates(target,inv).subtract(origin).normalize();const dot=Math.max(-1,Math.min(1,V.Dot(current,desired)));if(dot>.99999)return;let axis=V.Cross(current,desired);if(axis.lengthSquared()<1e-8)axis=V.Cross(current,new V(1,0,0));if(axis.lengthSquared()<1e-8)axis=V.Cross(current,new V(0,0,1));const delta=B.Quaternion.RotationAxis(axis.normalize(),Math.acos(dot));joint.rotationQuaternion=delta.multiply(joint.rotationQuaternion||B.Quaternion.FromEulerVector(joint.rotation));joint.computeWorldMatrix(true);child.computeWorldMatrix(true)}
 function solveArm(upper,lower,hand,target,pole){if(!upper||!lower||!hand)return;upper.computeWorldMatrix(true);lower.computeWorldMatrix(true);hand.computeWorldMatrix(true);const a=upper.getAbsolutePosition().clone(),b=lower.getAbsolutePosition().clone(),c=hand.getAbsolutePosition().clone(),l1=V.Distance(a,b),l2=V.Distance(b,c),delta=target.subtract(a),distance=Math.min(delta.length(),(l1+l2)*.97);if(distance<.001)return;const dir=delta.normalize(),perp=pole.subtract(a);perp.subtractInPlace(dir.scale(V.Dot(perp,dir))).normalize();const along=(l1*l1-l2*l2+distance*distance)/(2*distance),height=Math.sqrt(Math.max(0,l1*l1-along*along));const elbow=a.add(dir.scale(along)).add(perp.scale(height));pointJoint(upper,lower,elbow);hand.computeWorldMatrix(true);pointJoint(lower,hand,a.add(dir.scale(distance)))}
-function poseSoldier(e){if(!e.rig||!e.root.isEnabled())return;updateWorld(e.model);const world=e.root.getWorldMatrix(),local=p=>V.TransformCoordinates(p,world),bob=e.motion==='Idle'?0:Math.sin(e.phase)*.012;
+// Two dozen rigs cannot each run IK every frame; distant soldiers keep their clip pose.
+function poseSoldier(e){if(!e.rig||!e.root.isEnabled())return;
+if(V.DistanceSquared(e.root.position,scene.activeCamera.position)>3600&&e!==selfBody&&e!==lobbySoldier)return;
+updateWorld(e);const world=e.root.getWorldMatrix(),local=p=>V.TransformCoordinates(p,world),bob=e.motion==='Idle'?0:Math.sin(e.phase)*.012;
 solveArm(e.rig.RightArm,e.rig.RightForeArm,e.rig.RightHand,local(new V(.14,1.27+bob,.31)),local(new V(.65,1.1,.02)));
 solveArm(e.rig.LeftArm,e.rig.LeftForeArm,e.rig.LeftHand,local(new V(-.07,1.29+bob,.57)),local(new V(-.6,1.08,.05)));
 e.rifle.position.y=1.29+bob;e.rifle.position.z=.42-(e.flashTime>0?.025:0);
@@ -452,16 +642,17 @@ for(const[name,x,y,z,w,h,d,material]of [['nape guard',0,-.045,-.145,.21,.09,.05,
 }
 e.gearHelmet.setEnabled(false);
 e.gearVest=new B.TransformNode('worn vest',scene);e.gearVest.parent=root;
+// Cut close to the torso: a carrier covers the ribs, not the throat.
 for(const[name,x,y,z,w,h,d,material]of [
-  ['chest plate',0,.02,.14,.4,.4,.085,M.kevlar],['back plate',0,.02,-.14,.38,.38,.08,M.kevlar],
-  ['left side panel',-.2,-.02,0,.055,.3,.22,M.kevlar],['right side panel',.2,-.02,0,.055,.3,.22,M.kevlar],
-  ['left shoulder strap',-.155,.245,.015,.095,.12,.26,M.kevlar],['right shoulder strap',.155,.245,.015,.095,.12,.26,M.kevlar],
-  ['cummerbund',0,-.19,0,.4,.13,.3,M.kevlar],['collar guard',0,.25,.12,.24,.07,.07,M.kevlar],
-  ['radio pouch',-.19,.05,-.175,.1,.15,.06,M.dark],['left buckle',-.155,.19,.185,.07,.04,.02,M.steel],['right buckle',.155,.19,.185,.07,.04,.02,M.steel]]){
+  ['chest plate',0,-.02,.125,.33,.33,.07,M.kevlar],['back plate',0,-.02,-.125,.31,.31,.065,M.kevlar],
+  ['left side panel',-.155,-.04,0,.05,.24,.2,M.kevlar],['right side panel',.155,-.04,0,.05,.24,.2,M.kevlar],
+  ['left shoulder strap',-.115,.17,.01,.075,.1,.24,M.kevlar],['right shoulder strap',.115,.17,.01,.075,.1,.24,M.kevlar],
+  ['cummerbund',0,-.185,0,.32,.11,.25,M.kevlar],
+  ['radio pouch',-.15,.01,-.155,.08,.12,.05,M.dark],['left buckle',-.115,.11,.155,.06,.035,.02,M.steel],['right buckle',.115,.11,.155,.06,.035,.02,M.steel]]){
   const piece=box(name,x,y,z,w,h,d,material,false,false);piece.parent=e.gearVest;piece.receiveShadows=true;shadow.addShadowCaster(piece);
 }
-for(const x of [-.115,0,.115]){const pouch=box('mag pouch',x,-.02,.2,.095,.16,.07,M.kevlar,false,false);pouch.parent=e.gearVest;pouch.receiveShadows=true;
-  const flap=box('pouch flap',x,.07,.205,.1,.03,.075,M.dark,false,false);flap.parent=e.gearVest}
+for(const x of [-.09,0,.09]){const pouch=box('mag pouch',x,-.07,.175,.075,.13,.055,M.kevlar,false,false);pouch.parent=e.gearVest;pouch.receiveShadows=true;
+  const flap=box('pouch flap',x,-.005,.18,.08,.025,.06,M.dark,false,false);flap.parent=e.gearVest}
 e.gearVest.setEnabled(false);
 // A drawn blade replaces the rifle in the hands.
 e.blade=new B.TransformNode('held blade',scene);e.blade.parent=root;e.blade.position.set(.17,1.22,.4);e.blade.rotation.set(-.25,0,0);
@@ -492,7 +683,7 @@ scene.onAfterAnimationsObservable.add(()=>{if(selfBody&&selfBody.root.isEnabled(
 async function loadCharacters(){try{start.disabled=true;start.textContent='캐릭터 불러오는 중…';boot?.stage('캐릭터와 텍스처 다운로드 중…');soldierAssets=await B.SceneLoader.LoadAssetContainerAsync('assets/','soldier.glb',scene);for(const material of soldierAssets.materials){if(material instanceof B.PBRMaterial){material.metallic=0;material.roughness=.85;material.environmentIntensity=.6;material.directIntensity=1;material.albedoColor=new C(.85,.85,.85)}}for(const a of soldierAssets.animationGroups)a.stop();lobbySoldier=makeSoldier(0,2.1,-51);lobbySoldier.root.rotation.y=Math.PI+.12;camera.position.set(-1,1.6,-56);camera.rotation.set(.04,.02,0);charactersReady=true;boot?.stage('3D 화면 준비 중…');scene.executeWhenReady(()=>{start.disabled=false;start.textContent='혼자 플레이 →';boot?.ready();window.GameOnline?.ready()})}catch(error){console.error(error);startupFailure('인체 모델을 불러오지 못했습니다. 연결을 확인하고 새로고침해 주세요.',error);start.disabled=true;start.textContent='캐릭터 로딩 실패'}}
 loadCharacters();
 
-function resetRound(){if(!charactersReady)return;if(lobbySoldier){lobbySoldier.root.setEnabled(false);for(const a of lobbySoldier.animationGroups)a.stop()}for(const c of corpses)disposeSoldier(c.e);corpses.length=0;for(const e of enemies)disposeSoldier(e);enemies.length=0;for(const e of effects)e.mesh.dispose();effects.length=0;dropSelfBody();clearGrenades();outro=null;$('outro').hidden=true;populateLoot(W.spawns[0]);for(let i=0;i<BOTS;i++)spawnBot(i);player=R.newPlayer();time=clock=0;zone=R.zoneAt(0);const drop=W.spawns[0];yaw=Math.atan2(-drop[0],-drop[1]);pitch=0;reloading=healing=shotTimer=recoil=hitTimer=damageFade=throwTimer=shake=0;camera.position.set(drop[0],1.7,drop[1]);camera.rotation.set(0,yaw,0);nearest=null;clearInput();updateGun();state='playing';$('screen').hidden=true;$('hud').hidden=false;$('touch').hidden=!touch;$('killfeed').textContent='';$('damage').style.opacity=0;$('zonewash').style.opacity=0;$('flashwash').style.opacity=0;audioStart();notify('보급품은 매 라운드 무작위로 흩어집니다 · '+(touch?'섬광·폭탄 버튼':controls.keyLabel('flash')+'·'+controls.keyLabel('frag'))+'으로 투척 · '+(touch?'시점 버튼':controls.keyLabel('view'))+' 시점 전환',6);ui();lock()}
+function resetRound(){if(!charactersReady)return;followSun(W.spawns[0]?{x:W.spawns[0][0],z:W.spawns[0][1]}:{x:0,z:0});if(lobbySoldier){lobbySoldier.root.setEnabled(false);for(const a of lobbySoldier.animationGroups)a.stop()}for(const c of corpses)disposeSoldier(c.e);corpses.length=0;for(const e of enemies)disposeSoldier(e);enemies.length=0;for(const e of effects)e.mesh.dispose();effects.length=0;dropSelfBody();clearGrenades();outro=null;$('outro').hidden=true;populateLoot(W.spawns[0]);for(let i=0;i<BOTS;i++)spawnBot(i);player=R.newPlayer();time=clock=0;zone=R.zoneAt(0);const drop=W.spawns[0];yaw=Math.atan2(-drop[0],-drop[1]);pitch=0;reloading=healing=shotTimer=recoil=hitTimer=damageFade=throwTimer=shake=0;camera.position.set(drop[0],1.7,drop[1]);camera.rotation.set(0,yaw,0);nearest=null;clearInput();updateGun();state='playing';$('screen').hidden=true;$('hud').hidden=false;$('touch').hidden=!touch;$('killfeed').textContent='';$('damage').style.opacity=0;$('zonewash').style.opacity=0;$('flashwash').style.opacity=0;audioStart();notify('보급품은 매 라운드 무작위로 흩어집니다 · '+(touch?'섬광·폭탄 버튼':controls.keyLabel('flash')+'·'+controls.keyLabel('frag'))+'으로 투척 · '+(touch?'시점 버튼':controls.keyLabel('view'))+' 시점 전환',6);ui();lock()}
 function pause(){if(netMode){netMenu();return}if(state!=='playing')return;state='paused';for(const e of enemies)for(const a of e.animationGroups)a.pause();clearInput();if(document.pointerLockElement)document.exitPointerLock();$('screen').hidden=false;$('touch').hidden=true;$('screen-title').textContent='전장 일시정지';$('screen-desc').textContent='이어하기를 누르면 자기장과 전투가 다시 진행됩니다.';start.textContent='전투 이어하기 →'}
 function resume(){if(netMode){netResume();return}state='playing';for(const e of enemies)e.animations[e.motion]?.play(true);clearInput();$('screen').hidden=true;$('touch').hidden=!touch;audioStart();lock()}
 function end(won,cause=''){if(state!=='playing')return;
@@ -535,7 +726,7 @@ shotTimer=Math.max(0,shotTimer-dt);punchTimer=Math.max(0,punchTimer-dt);throwTim
 if(player.blind>0)player.blind=Math.max(0,player.blind-dt);$('flashwash').style.opacity=String(Math.min(1,(player.blind||0)/1.6));
 if(reloading>0){reloading-=dt;if(reloading<=0){reloading=0;R.reload(player);beep(420,.06,.04,'square');ui()}}
 if(healing>0){healing-=dt;if(healing<=0){healing=0;R.heal(player);beep(650,.15,.06);ui()}}
-let mx=(pressed('right')?1:0)-(pressed('left')?1:0)+move.x,mz=(pressed('forward')?1:0)-(pressed('back')?1:0)-move.y,length=Math.hypot(mx,mz);if(length>1){mx/=length;mz/=length}const speed=healing?1.8:ads?2.7:pressed('sprint')?7:4.8;advance(camera.position,(mx*Math.cos(yaw)+mz*Math.sin(yaw))*speed*dt,(-mx*Math.sin(yaw)+mz*Math.cos(yaw))*speed*dt);if(length>.1)step+=dt*10;camera.position.y=1.7+(length>.1?Math.sin(step)*.02:0);camera.rotation.set(pitch-recoil*.2,yaw,0);if(shake>0){camera.rotation.x+=(Math.random()-.5)*shake;camera.rotation.y+=(Math.random()-.5)*shake;camera.rotation.z=(Math.random()-.5)*shake*.7;shake=Math.max(0,shake-dt*1.7);if(!shake)camera.rotation.z=0}camera.fov+=((ads&&!R.melee(player.equipped)?(player.equipped==='marksman'?.45:.7):1.08)-camera.fov)*Math.min(1,dt*12);gun.position.x+=( (ads?0:.23)-gun.position.x)*Math.min(1,dt*12);gun.position.y=-.23+(length>.1?Math.sin(step)*.009:0)-(reloading||healing?.16:0);gun.position.z=.48-recoil;gun.rotation.x=reloading?-.45:0;poseHands(length>.1);placeView(length>.1);
+let mx=(pressed('right')?1:0)-(pressed('left')?1:0)+move.x,mz=(pressed('forward')?1:0)-(pressed('back')?1:0)-move.y,length=Math.hypot(mx,mz);if(length>1){mx/=length;mz/=length}const speed=healing?1.8:ads?2.7:pressed('sprint')?7:4.8;advance(camera.position,(mx*Math.cos(yaw)+mz*Math.sin(yaw))*speed*dt,(-mx*Math.sin(yaw)+mz*Math.cos(yaw))*speed*dt);if(length>.1)step+=dt*10;camera.position.y=1.7+(length>.1?Math.sin(step)*.02:0);followSun(camera.position);camera.rotation.set(pitch-recoil*.2,yaw,0);if(shake>0){camera.rotation.x+=(Math.random()-.5)*shake;camera.rotation.y+=(Math.random()-.5)*shake;camera.rotation.z=(Math.random()-.5)*shake*.7;shake=Math.max(0,shake-dt*1.7);if(!shake)camera.rotation.z=0}camera.fov+=((ads&&!R.melee(player.equipped)?(player.equipped==='marksman'?.45:.7):1.08)-camera.fov)*Math.min(1,dt*12);gun.position.x+=( (ads?0:.23)-gun.position.x)*Math.min(1,dt*12);gun.position.y=-.23+(length>.1?Math.sin(step)*.009:0)-(reloading||healing?.16:0);gun.position.z=.48-recoil;gun.rotation.x=reloading?-.45:0;poseHands(length>.1);placeView(length>.1);
 if(held)shoot();updateGrenades(dt);if(state!=='playing')return;updateBots(dt);for(let i=corpses.length-1;i>=0;i--){const c=corpses[i];c.age+=dt;c.e.root.rotation.x=-Math.min(1,c.age/.45)*Math.PI/2;if(c.age>5){disposeSoldier(c.e);corpses.splice(i,1)}}stepEffects(dt);hudTimer-=dt;if(hudTimer<=0){searchLoot();ui();hudTimer=.12}}
 const keyActions={collect,reload,heal,swap,view:toggleView,fists:()=>equip('fists'),melee:equipMelee,gun:equipGun,flash:()=>throwItem('flash'),frag:()=>throwItem('frag')};
 addEventListener('keydown',e=>{if(controls.modalOpen||controls.editing||window.GameOnline?.modalOpen)return;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();if(e.repeat)return;keys.add(e.code);if(e.code==='Escape'){pause();return}keyActions[controls.actionFor(e.code)]?.()});addEventListener('keyup',e=>keys.delete(e.code));
@@ -578,6 +769,7 @@ function netTick(dt){
   shotTimer=Math.max(0,shotTimer-dt);punchTimer=Math.max(0,punchTimer-dt);throwTimer=Math.max(0,throwTimer-dt);if(player.blind>0)player.blind=Math.max(0,player.blind-dt);$('flashwash').style.opacity=String(Math.min(1,(player.blind||0)/1.6));recoil=Math.max(0,recoil-dt*.55);damageFade=Math.max(0,damageFade-dt*1.8);hitTimer=Math.max(0,hitTimer-dt);noticeTimer-=dt;feedTimer-=dt;if(noticeTimer<=0)$('notice').textContent='';if(feedTimer<=0)$('killfeed').textContent='';$('damage').style.opacity=damageFade;$('hitmarker').style.opacity=hitTimer>0?1:0;muzzle.setEnabled(recoil>.025);
   if(state==='playing'&&netConnected){let mx=(pressed('right')?1:0)-(pressed('left')?1:0)+move.x,mz=(pressed('forward')?1:0)-(pressed('back')?1:0)-move.y;const len=Math.hypot(mx,mz);if(len>1){mx/=len;mz/=len}netMoving=len>.1;const speed=healing?1.8:ads?2.7:pressed('sprint')?7:4.8;W.move(camera.position,(mx*Math.cos(yaw)+mz*Math.sin(yaw))*speed*dt,(-mx*Math.sin(yaw)+mz*Math.cos(yaw))*speed*dt);if(held)netShot();}
   if(netTarget&&netState?.phase==='playing'){const d=Math.hypot(camera.position.x-netTarget.x,camera.position.z-netTarget.z);const factor=d>2?1:Math.min(1,dt*5);camera.position.x+=(netTarget.x-camera.position.x)*factor;camera.position.z+=(netTarget.z-camera.position.z)*factor;}
+  followSun(camera.position);
   if(netState?.phase==='playing'||netState?.phase==='finished'){camera.position.y=1.7;camera.rotation.set(pitch-recoil*.2,yaw,0);camera.fov+=((ads&&!R.melee(player.equipped)?(player.equipped==='marksman'?.45:.7):1.08)-camera.fov)*Math.min(1,dt*12);gun.position.x+=((ads?0:.23)-gun.position.x)*Math.min(1,dt*12);gun.position.y=-.23-(reloading||healing?.16:0);gun.position.z=.48-recoil;gun.rotation.x=reloading?-.45:0;poseHands(netMoving);placeView(netMoving);$('zonewash').style.opacity=R.outsideZone(camera.position.x,camera.position.z,zone)?'.9':'0';}
   netSendTime-=dt;if(netSendTime<=0){netSendTime=.1;if(netConnected&&netState?.phase==='playing')netSend(state!=='playing')}
   stepEffects(dt);

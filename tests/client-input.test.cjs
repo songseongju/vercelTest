@@ -8,15 +8,18 @@ class TestTexture extends B.Texture{constructor(name,size,scene){super(null,scen
 const listeners={};function listen(type,fn){(listeners[type]??=[]).push(fn)};const els={};const element=id=>els[id]??={style:{},textContent:'',hidden:false,classList:{toggle:noop,add:noop,remove:noop},getContext:()=>ctx,querySelector:()=>element(id+'child'),addEventListener(type,fn){(this.events??={})[type]=fn},setPointerCapture(){throw Object.assign(Error('capturing under lock'),{name:'InvalidStateError'})},getBoundingClientRect:()=>({left:0,top:0,width:100,height:100})};
 const bytes=new Uint8Array(fs.readFileSync(require('node:path').join(__dirname,'../assets/soldier.glb')));
 const sandbox={console,Math,Map,Set,Float32Array,Int16Array,Uint8Array,performance:{now:()=>0},setTimeout,clearTimeout,window:{devicePixelRatio:1,BABYLON:true,BattleRules:require('../rules.js'),BattleWorld:require('../shared/world.js')},BABYLON:{...B,Engine:TestEngine,DynamicTexture:TestTexture,Texture:TestImage,SceneLoader:{LoadAssetContainerAsync:(_root,_name,scene)=>B.LoadAssetContainerAsync(bytes,scene,{pluginExtension:'.glb'})}},document:{getElementById:element,body:{classList:{toggle:noop,add:noop,remove:noop}},addEventListener:noop,querySelector:()=>element('desktop-help')},navigator:{},matchMedia:()=>({matches:true}),addEventListener:listen};
-test('client gameplay survives pointer-lock shooting and mobile controls',async()=>{sandbox.window.createFieldEnvironment=()=>({materials:{},quality:noop,mapBox:noop,tree:noop,surface:()=>new B.StandardMaterial('fixture')});sandbox.window.GameControls={isTouch:()=>true,keyLabel:a=>({collect:'E',reload:'R',heal:'F',swap:'Q',view:'V'}[a]),code:a=>({collect:'KeyE',reload:'KeyR',heal:'KeyF',swap:'KeyQ',view:'KeyV'}[a]),connect:hooks=>hooks.changed()};vm.createContext(sandbox);vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../loot-visuals.js'),'utf8'),sandbox);let src=fs.readFileSync(require('node:path').join(__dirname,'../game.js'),'utf8');src=src.replace('loadCharacters();','globalThis.characterLoading=loadCharacters();').replace(/\}\)\(\);\s*$/,'globalThis.api={run:code=>eval(code)};})();');vm.runInContext(src,sandbox);await sandbox.characterLoading;const run=sandbox.api.run;assert.equal(run('charactersReady'),true);assert.equal(run('highQuality'),false);assert.equal(run('scene.shadowsEnabled'),false);assert.equal(run('engine.getHardwareScalingLevel()'),1);run('resetRound();scene.render()');assert.equal(run('enemies.length'),12);assert.ok(run('enemies.every(e=>e.rig.Head&&e.rig.RightHand&&e.rig.LeftHand)'));assert.equal(run('new Set(enemies.map(e=>e.skeletons[0])).size'),12,'independent skeletons');assert.equal(run('Object.keys(enemies[0].animations).length'),3);
+const BOTS=23;
+test('client gameplay survives pointer-lock shooting and mobile controls',async()=>{sandbox.window.createFieldEnvironment=()=>({materials:{},quality:noop,mapBox:noop,tree:noop,surface:()=>new B.StandardMaterial('fixture')});const BINDINGS={collect:'KeyF',reload:'KeyR',heal:'Digit4',flash:'Digit5',frag:'Digit6',swap:'KeyQ',view:'KeyV',fists:'Digit1',melee:'Digit2',gun:'Digit3',forward:'KeyW',back:'KeyS',left:'KeyA',right:'KeyD',sprint:'ShiftLeft'};
+const KEYLABEL=code=>code.startsWith('Key')?code.slice(3):code.startsWith('Digit')?code.slice(5):code;
+sandbox.window.GameControls={isTouch:()=>true,keyLabel:a=>KEYLABEL(BINDINGS[a]||''),code:a=>BINDINGS[a],actionFor:code=>Object.keys(BINDINGS).find(a=>BINDINGS[a]===code)||null,connect:hooks=>hooks.changed()};vm.createContext(sandbox);vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../loot-visuals.js'),'utf8'),sandbox);let src=fs.readFileSync(require('node:path').join(__dirname,'../game.js'),'utf8');src=src.replace('loadCharacters();','globalThis.characterLoading=loadCharacters();').replace(/\}\)\(\);\s*$/,'globalThis.api={run:code=>eval(code)};})();');vm.runInContext(src,sandbox);await sandbox.characterLoading;const run=sandbox.api.run;assert.equal(run('charactersReady'),true);assert.equal(run('highQuality'),false);assert.equal(run('scene.shadowsEnabled'),false);assert.equal(run('engine.getHardwareScalingLevel()'),1);run('resetRound();scene.render()');assert.equal(run('enemies.length'),BOTS);assert.ok(run('enemies.every(e=>e.rig.Head&&e.rig.RightHand&&e.rig.LeftHand)'));assert.equal(run('new Set(enemies.map(e=>e.skeletons[0])).size'),BOTS,'independent skeletons');assert.equal(run('Object.keys(enemies[0].animations).length'),3);
 assert.equal(run("player.equipped"),'fists','everyone starts bare-handed');
 // Bare hands must fight: swing at a bot standing within arm's reach.
-run('enemies[0].root.position.set(0,0,-50);enemies[0].hp=100;enemies[0].armor=0;camera.position.set(0,1.7,-51.6);yaw=0;pitch=0;shotTimer=0;scene.render();shoot()');
+run('enemies[0].root.position.set(0,0,-50);enemies[0].hp=100;enemies[0].armor=0;camera.position.set(0,1.7,-51.6);yaw=0;pitch=0;camera.rotation.set(0,0,0);shotTimer=0;scene.render();shoot()');
 assert.ok(run('enemies[0].hp<100'),'fists damage a bot in reach');assert.equal(run('player.reserve'),0,'fists consume no ammo');
-run('globalThis.dented=enemies[0].hp;enemies[0].root.position.set(0,0,-20);shotTimer=0;camera.position.set(0,1.7,-51.6);scene.render();shoot()');
+run('globalThis.dented=enemies[0].hp;enemies[0].root.position.set(0,0,-20);shotTimer=0;camera.position.set(0,1.7,-51.6);camera.rotation.set(0,0,0);scene.render();shoot()');
 assert.equal(run('enemies[0].hp'),run('dented'),'a punch with nobody in reach lands on nothing');
 // Randomised loot: find the carbine this round actually placed instead of assuming a fixed spot.
-run("const g=loot.find(l=>l.type==='weapon'&&l.weapon==='carbine'&&!l.taken);camera.position.set(g.x,1.7,g.z);shotTimer=0;scene.render();collect();shoot()");
+run("const g=loot.find(l=>l.type==='weapon'&&l.weapon==='carbine'&&!l.taken);camera.position.set(g.x,1.7,g.z);camera.rotation.set(0,0,0);shotTimer=0;scene.render();collect();shoot()");
 assert.equal(run('player.weapons.carbine.ammo'),29);assert.equal(run("player.equipped"),'carbine');
 sandbox.document.pointerLockElement=element('world');run('touch=false;shotTimer=0');assert.doesNotThrow(()=>element('world').events.pointerdown({button:0,pointerId:1,clientX:50,clientY:50}));run('tick(.02)');for(const fn of listeners.pointerup||[])fn({button:0,pointerId:1});assert.equal(run('player.weapons.carbine.ammo'),28);assert.equal(run('held'),false);sandbox.document.pointerLockElement=null;run('touch=true');
 run('player.reserve=60;reload();for(let i=0;i<41;i++){tick(.05);scene.render()}');assert.equal(run('player.weapons.carbine.ammo'),30);
@@ -24,9 +27,23 @@ run('player.reserve=60;reload();for(let i=0;i<41;i++){tick(.05);scene.render()}'
 run('enemies[0].root.position.set(0,0,-40);enemies[0].root.rotation.y=Math.PI;scene.render()');assert.ok(run('enemies[0].headHit.position.y>1.45&&enemies[0].headHit.position.y<2'));
 assert.equal(run('scene.pickWithRay(new B.Ray(new V(0,enemies[0].headHit.position.y,-44),new V(0,0,1),5),m=>m===enemies[0].headHit).hit'),true);
 run('pause()');const old=run('time');run('tick(1);scene.render()');assert.equal(run('time'),old);run('resume();modelAnimation(enemies[0],"Run");scene.render()');assert.equal(run('enemies[0].motion'),'Run');
-run('die(enemies[0],"player");scene.render()');assert.equal(run('corpses.length'),1);assert.equal(run('corpses[0].e.headHit.isPickable'),false);run('resetRound();scene.render()');assert.equal(run('corpses.length'),0);assert.equal(run('enemies.length'),12);assert.equal(run('scene.animationGroups.filter(a=>a.name.startsWith("bot")&& !a.name.startsWith("bot0_")).length'),48,'restart must not leak animation groups');
-run('for(const e of [...enemies])die(e,"player")');assert.equal(run('state'),'won');assert.ok(run("loot.filter(l=>l.type==='med').every(l=>l.root.getChildMeshes().some(m=>m.name==='carry handle'))"));assert.ok(run("loot.some(l=>l.type==='vest')&&loot.filter(l=>l.type==='vest').every(l=>l.root.getChildMeshes().filter(m=>m.name==='shoulder strap').length===2)"),'vests keep their straps');
-assert.ok(run("loot.some(l=>l.type==='helmet')&&loot.filter(l=>l.type==='helmet').every(l=>l.root.getChildMeshes().some(m=>m.name==='helmet shell'))"),'helmets render as helmets');
+run('die(enemies[0],"player");scene.render()');assert.equal(run('corpses.length'),1);assert.equal(run('corpses[0].e.headHit.isPickable'),false);run('resetRound();scene.render()');assert.equal(run('corpses.length'),0);assert.equal(run('enemies.length'),BOTS);assert.equal(run('scene.animationGroups.filter(a=>a.name.startsWith("bot")&& !a.name.startsWith("bot0_")).length'),BOTS*4,'restart must not leak animation groups');
+run('for(const e of [...enemies])die(e,"player")');
+assert.equal(run('state'),'outro','the round plays out before the results screen');
+assert.equal(run("$('outro').hidden"),false,'the victory card is up');
+assert.equal(run("$('outro-tag').textContent"),'#1 LAST SURVIVOR');
+run('for(let i=0;i<140&&state==="outro";i++){tick(.05);scene.render()}');
+assert.equal(run('state'),'won','and hands over to the results screen when it finishes');
+assert.equal(run("$('outro').hidden"),true);
+// A placed pickup is merged down to one draw call, so the detail is checked on the builder itself.
+assert.ok(run("loot.every(l=>l.root.getChildMeshes().length===1)"),'every pickup is a single mesh');
+const parts=type=>run("(()=>{const r=lootVisuals.create("+JSON.stringify(type)+");const n=r.getChildMeshes().map(m=>m.name);r.dispose();return n})()");
+assert.ok(parts('med').includes('carry handle'),'medkits keep their carry handle');
+assert.equal(parts('vest').filter(n=>n==='shoulder strap').length,2,'vests keep their straps');
+assert.ok(parts('helmet').includes('helmet shell'),'helmets render as helmets');
+assert.ok(parts('frag').includes('frag body')&&parts('frag').includes('pull ring'),'frags look like frags');
+assert.ok(parts('flash').includes('stun canister'),'flashbangs look like flashbangs');
+assert.ok(run("loot.some(l=>l.type==='frag')||loot.some(l=>l.type==='flash')"),'throwables reach the ground');
 assert.equal(run("loot.some(l=>l.type==='armor')"),false,'the old single armour item is gone');run("resetRound();scene.render();const m=loot.find(l=>l.type==='med'&&!l.taken);camera.position.set(m.x,1.7,m.z);scene.render();searchLoot();");element('pickup').onclick();assert.equal(run('player.kits'),1,'tap pickup card collects med');run("const v=loot.find(l=>l.type==='vest'&&!l.taken);camera.position.set(v.x,1.7,v.z);scene.render();searchLoot();");element('loot').onclick();assert.equal(run('player.vest'),100,'touch button collects the vest');
 run("const h=loot.find(l=>l.type==='helmet'&&!l.taken);camera.position.set(h.x,1.7,h.z);scene.render();searchLoot();collect();");assert.equal(run('player.helmet'),100,'helmets are a separate pickup');
 // Worn gear has to show up on the body, not just in the numbers.
@@ -45,4 +62,41 @@ if(run("player.equipped==='knife'")){
 }
 run('thirdPerson=false;ads=false;updateGun();placeView(false)');
 // Third person must swap the rendering camera without moving the eye the shot ray comes from.
-run('state="playing";ads=false;const eye=camera.position.clone();toggleView();placeView(false);');assert.equal(run('thirdPerson'),true);assert.equal(run('scene.activeCamera===viewCam'),true);assert.ok(run('V.Distance(viewCam.position,camera.position)>1'),'shoulder camera sits behind the eye');run('ads=true;placeView(false)');assert.equal(run('scene.activeCamera===camera'),true,'aiming snaps back to first person');run('ads=false;toggleView();placeView(false)');assert.equal(run('scene.activeCamera===camera'),true);run('scene.dispose();engine.dispose()');console.log('PASS: fists, randomised loot, third-person camera, actual GLB load, 12 independent skeletons, idle/walk/run clips, posed hands/head bounds, head hit detection, loot/fire/reload, pause, corpse cleanup, restart without animation leaks, win.');});
+run('state="playing";ads=false;const eye=camera.position.clone();toggleView();placeView(false);');assert.equal(run('thirdPerson'),true);assert.equal(run('scene.activeCamera===viewCam'),true);assert.ok(run('V.Distance(viewCam.position,camera.position)>1'),'shoulder camera sits behind the eye');run('ads=true;placeView(false)');assert.equal(run('scene.activeCamera===camera'),true,'aiming snaps back to first person');run('ads=false;toggleView();placeView(false)');assert.equal(run('scene.activeCamera===camera'),true);
+// The drop ring sits 92m out; the client used to fence the world at 68m and freeze everyone there.
+run('resetRound();scene.render()');
+assert.ok(run('Math.hypot(camera.position.x,camera.position.z)>80'),'players drop on the outer ring');
+assert.equal(run('blocked(camera.position.x,camera.position.z,.4)'),false,'the drop point is walkable');
+run('touch=false;move.x=move.y=0;globalThis.from=camera.position.clone();keys.add(controls.code("forward"));for(let i=0;i<14;i++)tick(.05);keys.delete(controls.code("forward"))');
+assert.ok(run('V.Distance(from,camera.position)')>2,'holding forward has to actually move the player');
+run('globalThis.side=camera.position.clone();keys.add(controls.code("right"));for(let i=0;i<10;i++)tick(.05);keys.clear()');
+assert.ok(run('V.Distance(side,camera.position)')>1,'strafing works from the bound key too');
+// Worn armour hangs off the skeleton now, facing the way the soldier faces.
+run("player.helmet=100;player.vest=100;state='playing';ads=false;thirdPerson=false;toggleView();placeView(false);scene.render()");
+assert.equal(run('selfBody.gearHelmet.isEnabled()'),true);
+assert.equal(run('selfBody.gearVest.isEnabled()'),true);
+assert.ok(run('selfBody.gearHelmet.position.y>1.5&&selfBody.gearHelmet.position.y<2'),'the helmet rides the head bone');
+assert.ok(run('selfBody.gearVest.position.y>1&&selfBody.gearVest.position.y<1.65'),'the vest rides the chest bone');
+assert.ok(run("selfBody.gearVest.getChildMeshes().find(m=>m.name==='chest plate').position.z>0"),'the chest plate is on the chest, not the back');
+assert.ok(run("selfBody.gearHelmet.getChildMeshes().find(m=>m.name==='nape guard').position.z<0"),'the nape guard is behind the head');
+assert.ok(run('!!selfBody.socketChest&&!!selfBody.socketHead'),'both sockets resolved to real bones');
+run('thirdPerson=false;ads=false;updateGun();placeView(false)');
+// Throwables: a frag leaves the pouch, flies, detonates and leaves a blast behind.
+run("resetRound();scene.render();player.frags=1;player.flashes=1;yaw=0;pitch=0;throwItem('frag')");
+assert.equal(run('grenades.length'),1,'the frag is in the air');
+assert.equal(run('player.frags'),0,'and out of the pouch');
+run('for(let i=0;i<90&&grenades.length;i++){tick(.05);scene.render()}');
+assert.equal(run('grenades.length'),0,'the fuse runs out');
+assert.ok(run('effects.length')>0,'a detonation leaves a blast behind');
+run("player.blind=0;detonate({kind:'flash',x:camera.position.x+2,y:.5,z:camera.position.z,owner:'other'})");
+assert.ok(run('player.blind')>0,'a flash at your feet blinds you');
+run("player.flashes=0;throwItem('flash')");
+assert.equal(run('grenades.length'),0,'an empty pouch throws nothing');
+// Dying plays out too, then falls through to the defeat screen.
+run("resetRound();scene.render();player.blind=0;hurt(500,'테스트')");
+assert.equal(run('state'),'outro');
+assert.equal(run("$('outro-tag').textContent"),'ELIMINATED');
+run('for(let i=0;i<120&&state==="outro";i++){tick(.05);scene.render()}');
+assert.equal(run('state'),'lost');
+assert.equal(run("$('outro').hidden"),true);
+run('scene.dispose();engine.dispose()');console.log('PASS: fists, randomised loot, third-person camera, actual GLB load, 23 independent skeletons, idle/walk/run clips, posed hands/head bounds, head hit detection, loot/fire/reload, pause, corpse cleanup, restart without animation leaks, win.');});

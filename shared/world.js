@@ -5,9 +5,9 @@
 const EDGE=104;
 const buildings=[[-70,-74,12,12],[-22,-78,14,12],[30,-80,12,12],[74,-70,12,12],[-78,-32,12,12],[-24,-38,12,12],[26,-34,14,12],[76,-30,12,12],[-76,28,12,12],[-28,26,14,12],[30,30,12,12],[78,26,12,12],[-66,76,14,12],[22,78,12,12]];
 // Depots are large enough to fight inside: a door on the south face and one on the east.
-const depots=[[-4,-4,26,20],[-62,2,22,18],[62,64,22,18]];
+const depots=[[24,-8,26,20],[-62,2,22,18],[62,64,22,18]];
 const cargos=[[-46,-58,6,13,'#617e87'],[-38,-58,6,13,'#aa7556'],[44,-52,6,13,'#6f826b'],[52,-52,6,13,'#687ca0'],[-52,50,6,13,'#8a6f55'],[-44,50,6,13,'#5f7d86'],[46,-6,6,13,'#7a8463'],[-4,44,13,6,'#6d7f9c'],[-4,52,13,6,'#9c7a58'],[64,-62,6,13,'#617e87'],[-86,60,6,13,'#6f826b'],[88,-44,6,13,'#687ca0'],[8,-58,13,6,'#7c6f86'],[-88,-8,6,13,'#6a8072']];
-const barriers=[[-12,-18,5],[12,-14,5],[-10,34,5],[40,-14,6],[-40,2,5],[10,-46,4],[-56,-30,5],[58,18,5],[-30,60,5],[34,56,6],[-72,50,5],[70,-6,5],[0,-30,6],[-14,68,5],[18,-66,5],[-64,-50,5],[62,40,5],[86,10,5]];
+const barriers=[[-12,-18,5],[6,-26,5],[-10,34,5],[40,-14,6],[-40,2,5],[10,-46,4],[-56,-30,5],[58,18,5],[-30,60,5],[34,56,6],[-72,50,5],[70,-6,5],[0,-30,6],[-14,68,5],[18,-66,5],[-64,-50,5],[62,40,5],[86,10,5]];
 const crates=[[-16,-50],[18,-46],[-38,18],[34,20],[-14,46],[46,-36],[-58,-64],[60,-70],[-80,-50],[82,-58],[-84,44],[86,48],[6,-20],[-6,16],[24,-8],[-30,-8],[52,30],[-52,32],[14,64],[-20,-64],[70,68],[-72,-20],[40,84],[-46,86]];
 // Sandbag lines are chest high: cover from a standing shot, but you can fire over them.
 const sandbags=[[-20,-24,6,1.3],[20,-24,6,1.3],[0,-48,1.3,6],[0,20,6,1.3],[-44,-20,1.3,6],[44,-20,1.3,6],[-34,44,6,1.3],[36,44,6,1.3],[-66,10,6,1.3],[66,10,1.3,6],[12,-72,6,1.3],[-12,72,6,1.3],[54,-24,6,1.3],[-54,-40,6,1.3]];
@@ -45,14 +45,55 @@ for(const[x,z,r]of tanks)block(x,3.2,z,r*2,6.4,r*2);
 for(const[x,z,s]of rocks)block(x,s*.8,z,s*1.9,s*1.6,s*1.8);
 for(const[x,z,w,d,h]of ruins)block(x,h/2,z,w,h,d);
 for(const[x,z,s]of trees)block(x,1.8*s,z,.6,3.6*s,.6);
+function rng(seed){let a=(seed>>>0)||1;return()=>{a=(a+0x6D2B79F5)>>>0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296}}
 function blocked(x,z,r=.4){return Math.abs(x)>EDGE-r||Math.abs(z)>EDGE-r||colliders.some(o=>o.movement&&Math.abs(x-o.x)<o.w+r&&Math.abs(z-o.z)<o.d+r)}
 function move(p,dx,dz,r=.4){if(!blocked(p.x+dx,p.z,r))p.x+=dx;if(!blocked(p.x,p.z+dz,r))p.z+=dz}
 function rayBox(origin,dir,o,max=Infinity){let near=0,far=max;for(const [axis,half]of [['x','w'],['y','h'],['z','d']]){if(Math.abs(dir[axis])<1e-8){if(origin[axis]<o[axis]-o[half]||origin[axis]>o[axis]+o[half])return Infinity}else{let a=(o[axis]-o[half]-origin[axis])/dir[axis],b=(o[axis]+o[half]-origin[axis])/dir[axis];if(a>b)[a,b]=[b,a];near=Math.max(near,a);far=Math.min(far,b);if(near>far)return Infinity}}return near}
 function wallDistance(origin,dir,max=Infinity){let distance=max;for(const o of colliders)distance=Math.min(distance,rayBox(origin,dir,o,distance));if(dir.y<0){const t=(.02-origin.y)/dir.y;if(t>=0)distance=Math.min(distance,t)}return distance}
 function visible(a,b){const dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,length=Math.hypot(dx,dy,dz);return length<.01||wallDistance(a,{x:dx/length,y:dy/length,z:dz/length},length)>=length-.05}
-// Sixteen drop points on a ring, nudged inward off anything they would land inside.
+// Sixteen drop points on a ring. A drop point needs elbow room and a clear run toward the
+// middle of the map, not just a square metre nobody is standing in.
+function runway(x,z,angle,want=9){let px=x,pz=z;for(let step=0;step<want/.3;step++){const nx=px+Math.sin(angle)*.3,nz=pz+Math.cos(angle)*.3;if(blocked(nx,nz,.5))return false;px=nx;pz=nz}return true}
 const spawns=[];
-for(let i=0;i<16;i++){const a=i/16*Math.PI*2;let x=0,z=0;for(let r=92;r>40;r-=2){x=Math.sin(a)*r;z=Math.cos(a)*r;if(!blocked(x,z,1.4))break}spawns.push([x,z])}
+for(let i=0;i<16;i++){const base=i/16*Math.PI*2;let best=null;
+  outer:for(let r=93;r>44&&!best;r-=2)for(const drift of [0,.05,-.05,.1,-.1,.16,-.16]){
+    const a=base+drift,x=Math.sin(a)*r,z=Math.cos(a)*r;
+    if(blocked(x,z,3.4))continue;
+    if(!runway(x,z,Math.atan2(-x,-z)))continue;
+    best=[x,z];break outer}
+  if(!best){let x=0,z=0;for(let r=92;r>40;r-=2){x=Math.sin(base)*r;z=Math.cos(base)*r;if(!blocked(x,z,1.4))break}best=[x,z]}
+  spawns.push(best)}
+// Roadside furniture and scrap, scattered from a fixed seed so every browser and the server
+// agree on exactly where the cover is. Placed after the spawn ring so nobody lands on a wreck.
+const wrecks=[],drums=[],pallets=[],tyres=[];
+const hubs=[...depots.map(([x,z])=>[x,z]),...buildings.map(([x,z])=>[x,z]),...cargos.map(([x,z])=>[x,z]),...towers,[0,0],[0,42],[0,-42],[42,10],[-42,10],[58,-30],[-58,30],[0,72],[0,-76]];
+const scatter=rng(20260917);
+function scatterProp(list,count,reach,clearance,build){
+  for(let made=0,guard=0;made<count&&guard<count*60;guard++){
+    const[hx,hz]=hubs[Math.floor(scatter()*hubs.length)];
+    const a=scatter()*Math.PI*2,r=7+scatter()*reach;
+    const x=hx+Math.sin(a)*r,z=hz+Math.cos(a)*r;
+    if(Math.abs(x)>EDGE-8||Math.abs(z)>EDGE-8||blocked(x,z,clearance))continue;
+    if(spawns.some(([sx,sz])=>Math.hypot(x-sx,z-sz)<11))continue;
+    list.push(build(x,z));made++;
+  }
+}
+// A wreck is axis-aligned so its collision box is exactly the shape players see.
+scatterProp(wrecks,12,16,3.6,(x,z)=>{const along=scatter()<.5,kind=scatter()<.45?'truck':scatter()<.75?'van':'car';
+  const length=kind==='truck'?7.2:kind==='van'?5.2:4.3,width=kind==='truck'?2.6:2.1;
+  const w=along?length:width,d=along?width:length;block(x,.95,z,w,1.9,d);return[x,z,w,d,kind,along?1:0]});
+scatterProp(drums,26,14,1.1,(x,z)=>{block(x,.46,z,.92,.92,.92);return[x,z,scatter()<.5?'#7d5a3a':'#4d6473']});
+scatterProp(pallets,16,13,1.6,(x,z)=>{const h=.55+Math.floor(scatter()*3)*.28;block(x,h/2,z,1.35,h,1.15);return[x,z,h]});
+scatterProp(tyres,12,13,1.3,(x,z)=>{const stack=3+Math.floor(scatter()*3);block(x,stack*.14,z,1.12,stack*.28,1.12);return[x,z,stack]});
+// Utility poles and lamp standards follow the two main roads and carry the skyline.
+// Everything here keeps well clear of a drop point: nobody should land facing a guard rail.
+const poles=[],lamps=[],rails=[];
+const clearOfSpawns=(x,z,min=13)=>spawns.every(([sx,sz])=>Math.hypot(x-sx,z-sz)>=min);
+function furniture(list,x,z,y,w,h,d,extra=[]){if(!clearOfSpawns(x,z)||blocked(x,z,Math.min(w,d)/2+.7))return;list.push([x,z,...extra]);block(x,y,z,w,h,d)}
+for(let i=-4;i<=4;i++){const z=i*22;if(Math.abs(z)<=84)furniture(poles,-8.6,z,4.4,.4,8.8,.4)}
+for(let i=-4;i<=4;i++){const x=i*24;if(Math.abs(x)<=84)furniture(poles,x,20.6,4.4,.4,8.8,.4)}
+for(let i=-5;i<=5;i++){const z=i*15+7;if(Math.abs(z)<=82)furniture(lamps,7.4,z,3,.28,6,.28,[1])}
+for(const[x,z,w,d]of [[0,-78,26,.4],[0,80,26,.4],[-30,10,.4,22],[30,10,.4,22],[-74,10,26,.4],[74,10,26,.4]])furniture(rails,x,z,.6,w,1.2,d,[w,d]);
 // Thrown ordnance: one physics step shared by the browser round and the authoritative server.
 const GRAVITY=17,GRENADE_TOP=4.4;
 function throwGrenade(kind,x,y,z,yaw,pitch,fuse,power=21){
@@ -87,8 +128,6 @@ function facing(actor,g){
   const dot=(view.x*dx+view.y*dy+view.z*dz)/length;
   return Math.max(0,Math.min(1,(dot+.35)/1.35));
 }
-// Loot placement is randomised per round. Pass a seed for a reproducible layout.
-function rng(seed){let a=(seed>>>0)||1;return()=>{a=(a+0x6D2B79F5)>>>0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296}}
 const weaponPool=['carbine','carbine','smg','smg','marksman'];
 const groundPool=['carbine','carbine','smg','smg','marksman','knife','knife','machete'];
 const pick=(list,random)=>list[Math.min(list.length-1,Math.floor(random()*list.length))];
@@ -122,7 +161,7 @@ function loot(seed){
   const add=(type,x,z,weapon=null,amount=60)=>items.push({id:'map-'+serial++,type,x,z,weapon,amount,taken:false});
   const hotspots=[...buildings.map(([x,z])=>[x,z,7]),...depots.map(([x,z,w])=>[x,z,w*.45]),...cargos.map(([x,z])=>[x,z,5.5]),...towers.map(([x,z])=>[x,z,6]),[0,0,13],[-86,-84,10],[86,84,10],[-86,84,10],[86,-84,10]];
   for(const[cx,cz,spread]of hotspots){
-    const count=2+Math.floor(random()*3);
+    const count=1+Math.floor(random()*2);
     for(let i=0;i<count;i++){
       const spot=freeSpot(random,cx,cz,spread);if(!spot)continue;
       const roll=random();
@@ -133,7 +172,7 @@ function loot(seed){
       else add(random()<.5?'frag':'flash',spot[0],spot[1]);
     }
   }
-  for(let i=0;i<46;i++){
+  for(let i=0;i<34;i++){
     const spot=freeSpot(random,0,0,94);if(!spot)continue;
     const roll=random();
     if(roll<.24)add('weapon',spot[0],spot[1],randomGroundWeapon(random));
@@ -148,5 +187,5 @@ function loot(seed){
   }
   return items;
 }
-return{EDGE,buildings,depots,cargos,barriers,crates,sandbags,fences,towers,tanks,rocks,ruins,trees,colliders,spawns,blocked,move,rayBox,wallDistance,visible,loot,rng,randomWeapon,randomGroundWeapon,freeSpot,cacheSpot,throwGrenade,stepGrenade,blastExposure,facing};
+return{EDGE,buildings,depots,cargos,barriers,crates,sandbags,fences,towers,tanks,rocks,ruins,trees,wrecks,drums,pallets,tyres,poles,lamps,rails,colliders,spawns,blocked,move,rayBox,wallDistance,visible,loot,rng,randomWeapon,randomGroundWeapon,freeSpot,cacheSpot,throwGrenade,stepGrenade,blastExposure,facing};
 });

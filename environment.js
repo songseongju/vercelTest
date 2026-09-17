@@ -45,11 +45,16 @@
       kevlar:surface('ballistic weave','gear/kevlar',.42,'#6e7355',0,1,3),
       helmetShell:surface('painted helmet shell','gear/plate',.7,'#59614a',.35,.62,1.6),
       blade:surface('forged blade','gear/plate',.5,'#b7c0c6',.85,.34,1),
-      grip:surface('wrapped leather grip','gear/leather',.16,'#4a4038',0,.78,3)
+      grip:surface('wrapped leather grip','gear/leather',.16,'#4a4038',0,.78,3),
+      // Surface wear: the same scans retinted so worn ground reads as earth, gravel and mud.
+      dirt:surface('bare earth','ground',3.2,'#8a7a5e'),
+      gravel:surface('gravel hardstanding','concrete',2.2,'#9b968a'),
+      mud:surface('churned mud','ground',2.6,'#6a5c48'),
+      rust:surface('rusted steel','metal',1.6,'#8a5f43',.5,.78)
     };
     const env=new B.HDRCubeTexture(root+'daylight.hdr',scene,lightweight?32:128,false,true,false,true);
     scene.environmentTexture=env;scene.environmentIntensity=.7;
-    const skybox=scene.createDefaultSkybox(env,true,300,.08);
+    const skybox=scene.createDefaultSkybox(env,true,1200,.08);
     if(skybox){skybox.isPickable=false;skybox.infiniteDistance=true;}
 
     // Alpha-cut branch cards give trees fine silhouettes without individual leaf meshes.
@@ -86,6 +91,23 @@
       const crown=B.Mesh.MergeMeshes(cards,true,true);crown.name='pine crown';crown.material=foliage;
       crown.isPickable=false;crown.receiveShadows=true;shadow.addShadowCaster(crown);return crown;
     }
+    // Ground cover: one alpha sheet of dry blades, scattered as crossed cards and merged in chunks.
+    const bladeTexture=new B.DynamicTexture('grass blades',{width:256,height:256},scene,true);
+    bladeTexture.hasAlpha=true;const blade=bladeTexture.getContext();blade.clearRect(0,0,256,256);
+    blade.lineCap='round';
+    for(let i=0;i<150;i++){
+      const x=6+random()*244,h=52+random()*168,lean=(random()-.5)*52;
+      const shade=Math.floor(96+random()*78);
+      blade.strokeStyle='rgb('+Math.floor(shade*1.04)+','+Math.floor(shade*.97)+','+Math.floor(shade*.56)+')';
+      blade.lineWidth=1.8+random()*2.6;
+      blade.beginPath();blade.moveTo(x,252);blade.quadraticCurveTo(x+lean*.35,252-h*.62,x+lean,252-h);blade.stroke();
+    }
+    bladeTexture.update();
+    const groundCover=new B.StandardMaterial('ground cover',scene);
+    groundCover.diffuseTexture=bladeTexture;groundCover.useAlphaFromDiffuseTexture=true;
+    groundCover.transparencyMode=B.Material.MATERIAL_ALPHATEST;groundCover.alphaCutOff=.42;
+    groundCover.backFaceCulling=false;groundCover.twoSidedLighting=true;
+    groundCover.specularColor=C.Black();groundCover.diffuseColor=new C(.96,.94,.76);
     function quality(high){
       for(const m of surfaces){
         if(high&&!normalMaps.has(m.metadata.asset))normalMaps.set(m.metadata.asset,texture(m.metadata.asset+'-normal.jpg'));
@@ -93,6 +115,6 @@
         if(m.bumpTexture){m.bumpTexture.level=.65;if(m.metadata.tile)m.bumpTexture.uScale=m.bumpTexture.vScale=m.metadata.tile;}
       }
     }
-    return{materials,surface,mapBox,tree,quality};
+    return{materials,surface,mapBox,tree,quality,groundCover,foliage};
   };
 })();
