@@ -48,21 +48,83 @@ for(const[x,z,s]of trees)block(x,1.8*s,z,.6,3.6*s,.6);
 function rng(seed){let a=(seed>>>0)||1;return()=>{a=(a+0x6D2B79F5)>>>0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296}}
 function blocked(x,z,r=.4){return Math.abs(x)>EDGE-r||Math.abs(z)>EDGE-r||colliders.some(o=>o.movement&&Math.abs(x-o.x)<o.w+r&&Math.abs(z-o.z)<o.d+r)}
 function move(p,dx,dz,r=.4){if(!blocked(p.x+dx,p.z,r))p.x+=dx;if(!blocked(p.x,p.z+dz,r))p.z+=dz}
+// The same body dimensions and gravity run in the browser and on the authoritative server.
+const stances={stand:{height:1.85,eye:1.7,speed:4.8},crouch:{height:1.2,eye:1.05,speed:2.25},prone:{height:.56,eye:.42,speed:1.05}};
+const stanceOf=p=>Object.hasOwn(stances,p.stance)?p.stance:'stand';
+const eyeHeight=p=>(p.feet||0)+stances[stanceOf(p)].eye;
+function footprint(p){if(stanceOf(p)!=='prone')return{w:.35,d:.35};return{w:.32+Math.abs(Math.sin(p.yaw||0))*.3,d:.32+Math.abs(Math.cos(p.yaw||0))*.3}}
+function bodyBlocked(p,x=p.x,z=p.z,feet=p.feet||0){const r=footprint(p),height=stances[stanceOf(p)].height;return Math.abs(x)>EDGE-r.w||Math.abs(z)>EDGE-r.d||colliders.some(o=>Math.abs(x-o.x)<o.w+r.w&&Math.abs(z-o.z)<o.d+r.d&&feet<o.y+o.h-.001&&feet+height>o.y-o.h+.001)}
+function supportHeight(p,limit=(p.feet||0)+.015){const r=footprint(p);let floor=0;for(const o of colliders){const top=o.y+o.h;if(top<=limit&&top>floor&&Math.abs(p.x-o.x)<o.w+r.w&&Math.abs(p.z-o.z)<o.d+r.d)floor=top}return floor}
+function changeStance(p,next){if(!Object.hasOwn(stances,next)||p.grounded===false)return false;const old=p.stance;p.stance=next;if(bodyBlocked(p)){p.stance=old;return false}return true}
+function jump(p){const floor=supportHeight(p);if(p.grounded===false||Math.abs((p.feet||0)-floor)>.02||!changeStance(p,'stand'))return false;p.feet=floor;p.vy=6.5;p.grounded=false;return true}
+function moveSpeed(p,input={}){const base=stanceOf(p)==='stand'?(input.sprint?7:4.8):stances[stanceOf(p)].speed;return Math.min(base,input.healing?1.8:input.aim?2.7:Infinity)}
+function stepMotion(p,input,dt){
+  dt=Math.max(0,Math.min(.05,dt));p.feet=Math.max(0,p.feet||0);p.vy=p.vy||0;
+  let x=input.x||0,z=input.z||0;const n=Math.hypot(x,z);if(n>1){x/=n;z/=n}const yaw=p.yaw||0,speed=moveSpeed(p,input),dx=(x*Math.cos(yaw)+z*Math.sin(yaw))*speed*dt,dz=(-x*Math.sin(yaw)+z*Math.cos(yaw))*speed*dt;
+  if(!bodyBlocked(p,p.x+dx,p.z))p.x+=dx;if(!bodyBlocked(p,p.x,p.z+dz))p.z+=dz;
+  const old=p.feet,height=stances[stanceOf(p)].height,r=footprint(p);p.vy-=18*dt;let next=old+p.vy*dt;
+  if(p.vy>0){for(const o of colliders){const ceiling=o.y-o.h;if(Math.abs(p.x-o.x)<o.w+r.w&&Math.abs(p.z-o.z)<o.d+r.d&&old+height<=ceiling+.001&&next+height>=ceiling){next=ceiling-height;p.vy=0}}}
+  const floor=supportHeight(p,old+.015);if(next<=floor&&p.vy<=0){next=floor;p.vy=0;p.grounded=true}else p.grounded=false;
+  p.feet=Math.max(0,next);
+}
+function hitVolumes(p){const feet=p.feet||0,stance=stanceOf(p),yaw=p.yaw||0;
+  if(stance==='prone')return{body:{x:p.x-Math.sin(yaw)*.32,y:feet+.25,z:p.z-Math.cos(yaw)*.32,w:.23+Math.abs(Math.sin(yaw))*.38,h:.22,d:.23+Math.abs(Math.cos(yaw))*.38},head:{x:p.x,y:feet+.42,z:p.z,w:.16,h:.14,d:.16}};
+  const crouch=stance==='crouch';return{body:{x:p.x,y:feet+(crouch?.49:.84),z:p.z,w:.25,h:crouch?.38:.675,d:.25},head:{x:p.x,y:eyeHeight(p)-.03,z:p.z,w:.16,h:.16,d:.16}};
+}
+
 function rayBox(origin,dir,o,max=Infinity){let near=0,far=max;for(const [axis,half]of [['x','w'],['y','h'],['z','d']]){if(Math.abs(dir[axis])<1e-8){if(origin[axis]<o[axis]-o[half]||origin[axis]>o[axis]+o[half])return Infinity}else{let a=(o[axis]-o[half]-origin[axis])/dir[axis],b=(o[axis]+o[half]-origin[axis])/dir[axis];if(a>b)[a,b]=[b,a];near=Math.max(near,a);far=Math.min(far,b);if(near>far)return Infinity}}return near}
 function wallDistance(origin,dir,max=Infinity){let distance=max;for(const o of colliders)distance=Math.min(distance,rayBox(origin,dir,o,distance));if(dir.y<0){const t=(.02-origin.y)/dir.y;if(t>=0)distance=Math.min(distance,t)}return distance}
 function visible(a,b){const dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,length=Math.hypot(dx,dy,dz);return length<.01||wallDistance(a,{x:dx/length,y:dy/length,z:dz/length},length)>=length-.05}
+// Supplies only ever spawn indoors, so the rooms themselves are the reason to take a risk.
+// A room is the walkable rectangle inside a shell, inset clear of the walls.
+const interiors=[
+  ...buildings.map(([x,z,w,d])=>({x,z,w:w-2.4,d:d-2.4,kind:'hut'})),
+  ...depots.map(([x,z,w,d])=>({x,z,w:w-3,d:d-3,kind:'depot'}))
+];
+// Shelving, benches and lockers: cover to fight around and something for crates to sit against.
+const fittings=[];
+const furnish=(x,z,w,d,h,kind)=>{fittings.push([x,z,w,d,h,kind]);block(x,h/2,z,w,h,d)};
+for(const [x,z,w,d] of buildings){
+  // Back wall shelving, a bench down one side and a locker beside the door.
+  for(const side of [-1,1])furnish(x+side*w*.26,z+d/2-1.1,w*.34,.6,1.9,'shelf');
+  furnish(x-w/2+1,z,.7,d*.4,.95,'bench');
+  furnish(x+w/2-.9,z+d*.22,.8,.8,1.95,'locker');
+  furnish(x+w*.2,z-d*.22,1.3,1.1,.75,'crate');
+}
+for(const [x,z,w,d] of depots){
+  for(const side of [-1,1]){
+    furnish(x+side*w*.36,z+d/2-1.4,w*.2,.8,2.3,'rack');
+    furnish(x+side*w*.36,z-d/2+1.8,w*.2,.8,2.3,'rack');
+    furnish(x+side*w*.13,z+d*.06,1.6,1.4,1.1,'crate');
+  }
+  furnish(x-w/2+1.2,z-d*.28,.8,d*.3,1,'bench');
+}
 // Sixteen drop points on a ring. A drop point needs elbow room and a clear run toward the
 // middle of the map, not just a square metre nobody is standing in.
+// Distance to the nearest room's wall, not its centre: a depot is 26m across.
+function roomGap(x,z){let best=Infinity;for(const r of interiors){const dx=Math.max(0,Math.abs(x-r.x)-r.w/2),dz=Math.max(0,Math.abs(z-r.z)-r.d/2);best=Math.min(best,Math.hypot(dx,dz))}return best}
 function runway(x,z,angle,want=9){let px=x,pz=z;for(let step=0;step<want/.3;step++){const nx=px+Math.sin(angle)*.3,nz=pz+Math.cos(angle)*.3;if(blocked(nx,nz,.5))return false;px=nx;pz=nz}return true}
 const spawns=[];
-for(let i=0;i<16;i++){const base=i/16*Math.PI*2;let best=null;
-  outer:for(let r=93;r>44&&!best;r-=2)for(const drift of [0,.05,-.05,.1,-.1,.16,-.16]){
-    const a=base+drift,x=Math.sin(a)*r,z=Math.cos(a)*r;
-    if(blocked(x,z,3.4))continue;
-    if(!runway(x,z,Math.atan2(-x,-z)))continue;
-    best=[x,z];break outer}
+// Chosen one at a time: each drop point has to stay out on the ring, keep clear of a stocked
+// building, keep a run toward the middle, and keep its distance from the drops already placed.
+for(let i=0;i<16;i++){
+  const base=i/16*Math.PI*2;let best=null,bestScore=-Infinity;
+  for(const elbow of [30,20,12]){
+    for(let r=95;r>52;r-=2.5)for(const drift of [0,.08,-.08,.16,-.16,.24,-.24]){
+      const a=base+drift,x=Math.sin(a)*r,z=Math.cos(a)*r;
+      if(blocked(x,z,3.4))continue;
+      const gap=roomGap(x,z);if(gap<15)continue;
+      if(!runway(x,z,Math.atan2(-x,-z)))continue;
+      let crowd=Infinity;for(const[sx,sz]of spawns)crowd=Math.min(crowd,Math.hypot(x-sx,z-sz));
+      if(crowd<elbow)continue;
+      const score=Math.min(gap,22)+r*.3+Math.min(crowd,70)*.22-Math.abs(drift)*8;
+      if(score>bestScore){bestScore=score;best=[x,z]}
+    }
+    if(best)break;
+  }
   if(!best){let x=0,z=0;for(let r=92;r>40;r-=2){x=Math.sin(base)*r;z=Math.cos(base)*r;if(!blocked(x,z,1.4))break}best=[x,z]}
-  spawns.push(best)}
+  spawns.push(best);
+}
 // Roadside furniture and scrap, scattered from a fixed seed so every browser and the server
 // agree on exactly where the cover is. Placed after the spawn ring so nobody lands on a wreck.
 const wrecks=[],drums=[],pallets=[],tyres=[];
@@ -116,7 +178,7 @@ function stepGrenade(g,dt){
   return g.fuse>0;
 }
 // How exposed an actor is to a blast: 0 when a wall is in the way or it is out of range.
-function blastExposure(g,actor,eye=1.15){
+function blastExposure(g,actor,eye=(actor.feet||0)+(stanceOf(actor)==='stand'?1.15:stances[stanceOf(actor)].eye)){
   const dx=actor.x-g.x,dy=eye-g.y,dz=actor.z-g.z,distance=Math.hypot(dx,dy,dz);
   if(!visible({x:g.x,y:Math.max(.25,g.y),z:g.z},{x:actor.x,y:eye,z:actor.z}))return{distance,clear:false};
   return{distance,clear:true};
@@ -124,7 +186,7 @@ function blastExposure(g,actor,eye=1.15){
 // 1 when the actor is staring straight at the flash, 0 when it is behind them.
 function facing(actor,g){
   const cos=Math.cos(actor.pitch||0),view={x:Math.sin(actor.yaw||0)*cos,y:-Math.sin(actor.pitch||0),z:Math.cos(actor.yaw||0)*cos};
-  const dx=g.x-actor.x,dy=g.y-1.15,dz=g.z-actor.z,length=Math.hypot(dx,dy,dz)||1;
+  const dx=g.x-actor.x,dy=g.y-((actor.feet||0)+(stanceOf(actor)==='stand'?1.15:stances[stanceOf(actor)].eye)),dz=g.z-actor.z,length=Math.hypot(dx,dy,dz)||1;
   const dot=(view.x*dx+view.y*dy+view.z*dz)/length;
   return Math.max(0,Math.min(1,(dot+.35)/1.35));
 }
@@ -145,47 +207,51 @@ function freeSpot(random,cx,cz,spread,clearSpawns=13,tries=30){
   }
   return null;
 }
-// Each player gets a guaranteed starter cache, but it is a run away and in a random direction.
-function cacheSpot(x,z,random=Math.random){
-  for(let i=0;i<40;i++){
-    const angle=random()*Math.PI*2,radius=14+random()*10;
-    const cx=x+Math.sin(angle)*radius,cz=z+Math.cos(angle)*radius;
-    if(Math.abs(cx)>EDGE-4||Math.abs(cz)>EDGE-4||blocked(cx,cz,1.1))continue;
-    return[cx,cz];
+// A spot inside one room: on the floor, clear of the shelving and never inside a wall.
+function interiorSpot(random,room,tries=26){
+  for(let i=0;i<tries;i++){
+    const x=room.x+(random()-.5)*room.w,z=room.z+(random()-.5)*room.d;
+    if(blocked(x,z,.55))continue;
+    return[x,z];
   }
+  return null;
+}
+// Your guaranteed starter cache is in the nearest building, so the first move is always indoors.
+function cacheSpot(x,z,random=Math.random){
+  let best=null,closest=Infinity;
+  for(const room of interiors){
+    const distance=Math.hypot(room.x-x,room.z-z);
+    if(distance<closest){closest=distance;best=room}
+  }
+  if(best){const spot=interiorSpot(random,best,40);if(spot)return spot}
   const fallback=freeSpot(random,x,z,22,0);return fallback||[x,z];
 }
+// Depots are the big score, huts are a quick top-up. Nothing is ever left lying in the open.
 function loot(seed){
   const random=typeof seed==='number'?rng(seed):Math.random;
   let serial=0;const items=[];
   const add=(type,x,z,weapon=null,amount=60)=>items.push({id:'map-'+serial++,type,x,z,weapon,amount,taken:false});
-  const hotspots=[...buildings.map(([x,z])=>[x,z,7]),...depots.map(([x,z,w])=>[x,z,w*.45]),...cargos.map(([x,z])=>[x,z,5.5]),...towers.map(([x,z])=>[x,z,6]),[0,0,13],[-86,-84,10],[86,84,10],[-86,84,10],[86,-84,10]];
-  for(const[cx,cz,spread]of hotspots){
-    const count=1+Math.floor(random()*2);
-    for(let i=0;i<count;i++){
-      const spot=freeSpot(random,cx,cz,spread);if(!spot)continue;
-      const roll=random();
-      if(roll<.32)add('weapon',spot[0],spot[1],randomGroundWeapon(random));
-      else if(roll<.54)add('ammo',spot[0],spot[1],null,45+Math.floor(random()*4)*15);
-      else if(roll<.7)add('med',spot[0],spot[1]);
-      else if(roll<.83)add(random()<.5?'helmet':'vest',spot[0],spot[1]);
-      else add(random()<.5?'frag':'flash',spot[0],spot[1]);
-    }
-  }
-  for(let i=0;i<34;i++){
-    const spot=freeSpot(random,0,0,94);if(!spot)continue;
-    const roll=random();
-    if(roll<.24)add('weapon',spot[0],spot[1],randomGroundWeapon(random));
-    else if(roll<.5)add('ammo',spot[0],spot[1],null,45+Math.floor(random()*4)*15);
-    else if(roll<.68)add('med',spot[0],spot[1]);
-    else if(roll<.84)add(random()<.5?'helmet':'vest',spot[0],spot[1]);
+  const place=(room,roll)=>{
+    const spot=interiorSpot(random,room);if(!spot)return;
+    if(roll<.18)add('weapon',spot[0],spot[1],randomGroundWeapon(random));
+    else if(roll<.45)add('ammo',spot[0],spot[1],null,45+Math.floor(random()*4)*15);
+    else if(roll<.62)add('med',spot[0],spot[1]);
+    else if(roll<.82)add(random()<.5?'helmet':'vest',spot[0],spot[1]);
     else add(random()<.5?'frag':'flash',spot[0],spot[1]);
+  };
+  for(const room of interiors){
+    const depot=room.kind==='depot',count=depot?9+Math.floor(random()*5):4+Math.floor(random()*3);
+    // Every room is worth entering: the first pull is always a weapon.
+    const spot=interiorSpot(random,room);
+    if(spot)add('weapon',spot[0],spot[1],randomGroundWeapon(random));
+    for(let i=1;i<count;i++)place(room,random());
   }
-  // A round is unplayable if the map is short of guns, so top up whatever the rolls missed.
-  for(let guard=0;items.filter(x=>x.type==='weapon').length<22&&guard<90;guard++){
-    const spot=freeSpot(random,0,0,94);if(spot)add('weapon',spot[0],spot[1],randomGroundWeapon(random));
+  // A round is unplayable if the map is short of guns for two dozen fighters.
+  for(let guard=0;items.filter(x=>x.type==='weapon').length<26&&guard<120;guard++){
+    const room=interiors[Math.floor(random()*interiors.length)],spot=interiorSpot(random,room);
+    if(spot)add('weapon',spot[0],spot[1],randomGroundWeapon(random));
   }
   return items;
 }
-return{EDGE,buildings,depots,cargos,barriers,crates,sandbags,fences,towers,tanks,rocks,ruins,trees,wrecks,drums,pallets,tyres,poles,lamps,rails,colliders,spawns,blocked,move,rayBox,wallDistance,visible,loot,rng,randomWeapon,randomGroundWeapon,freeSpot,cacheSpot,throwGrenade,stepGrenade,blastExposure,facing};
+return{stances,stanceOf,eyeHeight,footprint,bodyBlocked,supportHeight,changeStance,jump,moveSpeed,stepMotion,hitVolumes,EDGE,buildings,depots,cargos,barriers,crates,sandbags,fences,towers,tanks,rocks,ruins,trees,wrecks,drums,pallets,tyres,poles,lamps,rails,interiors,fittings,interiorSpot,colliders,spawns,blocked,move,rayBox,wallDistance,visible,loot,rng,randomWeapon,randomGroundWeapon,freeSpot,cacheSpot,throwGrenade,stepGrenade,blastExposure,facing};
 });

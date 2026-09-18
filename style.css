@@ -54,3 +54,7 @@
 @media(max-width:600px){.key-list{grid-template-columns:1fr}#pouch{gap:7px;font-size:10px}#slots span{min-width:54px;font-size:10px;padding:7px 5px}}
 @media(max-height:540px){#outro-title{font-size:min(64px,13vw)}#slots span{min-width:56px}}
 #hud.cinematic header,#hud.cinematic #zoneinfo,#hud.cinematic .bottom,#hud.cinematic #mapwrap,#hud.cinematic #crosshair,#hud.cinematic #killfeed,#hud.cinematic #notice{opacity:0;transition:opacity .45s ease}
+
+#posture-status{font-size:11px;color:#e5cf95;margin:5px 0}#touch button.selected{background:#d6ba64;color:#172a2c;border-color:#ffe3a5}
+
+#touch #prone{font-size:10px;white-space:nowrap;padding:0}

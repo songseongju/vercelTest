@@ -3,46 +3,94 @@
 process.env.LOOT_SEED='58';
 const test=require('node:test'),assert=require('node:assert/strict'),{WebSocket}=require('ws');
 const{createApp}=require('../server/app.cjs'),{MemoryStore}=require('../server/store.cjs');
-function client(url){const ws=new WebSocket(url),messages=[],waiters=[];ws.on('message',raw=>{const data=JSON.parse(raw.toString());messages.push(data);for(const w of [...waiters])if(w.predicate(data)){clearTimeout(w.timer);waiters.splice(waiters.indexOf(w),1);w.resolve(data)}});return{ws,messages,opened:new Promise((r,j)=>{ws.once('open',r);ws.once('error',j)}),send:msg=>ws.send(JSON.stringify(msg)),wait(predicate,timeout=6000){const existing=messages.find(predicate);if(existing)return Promise.resolve(existing);return new Promise((resolve,reject)=>{const w={predicate,resolve,timer:setTimeout(()=>{waiters.splice(waiters.indexOf(w),1);reject(Error('timeout '+messages.slice(-1).map(x=>JSON.stringify(x)).join()))},timeout)};waiters.push(w)})}}}
+// The transcript is trimmed: `latest` rescans it every walker tick, and an untrimmed log turns
+// a long match into a quadratic crawl that starves the very movement being measured.
+function client(url){const ws=new WebSocket(url),messages=[],waiters=[];ws.on('message',raw=>{const data=JSON.parse(raw.toString());messages.push(data);if(messages.length>240)messages.splice(0,messages.length-240);for(const w of [...waiters])if(w.predicate(data)){clearTimeout(w.timer);waiters.splice(waiters.indexOf(w),1);w.resolve(data)}});return{ws,messages,opened:new Promise((r,j)=>{ws.once('open',r);ws.once('error',j)}),send:msg=>ws.send(JSON.stringify(msg)),wait(predicate,timeout=6000){const existing=messages.find(predicate);if(existing)return Promise.resolve(existing);return new Promise((resolve,reject)=>{const w={predicate,resolve,timer:setTimeout(()=>{waiters.splice(waiters.indexOf(w),1);reject(Error('timeout '+messages.slice(-1).map(x=>JSON.stringify(x)).join()))},timeout)};waiters.push(w)})}}}
 async function server(store){const a=createApp({store,staticFiles:false});await new Promise(r=>a.server.listen(0,'127.0.0.1',r));a.url='ws://127.0.0.1:'+a.server.address().port+'/api/ws';a.stop=async()=>{await a.transport.close();await new Promise(r=>a.server.close(r))};return a}
 const R=require('../rules.js'),W=require('../shared/world.js');
 const latest=(c,predicate)=>c.messages.filter(predicate).at(-1);
 // Loot is randomised now, so the test walks the player to whatever the round generated.
-async function walkTo(c,id,target,seq,reach=1.5){
-  let previous=null,stuck=0;
-  for(let attempt=0;attempt<600;attempt++){
-    const state=latest(c,m=>m.type==='state')?.snapshot;
-    const me=state?.players.find(p=>p.id===id);
-    if(me){
-      const goal=typeof target==='function'?target(state):target;
-      if(!goal)return null;
-      const dx=goal.x-me.x,dz=goal.z-me.z,distance=Math.hypot(dx,dz);
-      if(distance<reach)return goal;
-      // Steer with whiskers: the heading closest to the goal that has clear ground ahead.
-      const want=Math.atan2(dx,dz);let yaw=want,best=-Infinity;
-      for(const turn of [0,.3,-.3,.6,-.6,.9,-.9,1.3,-1.3,1.8,-1.8,2.4,-2.4,Math.PI]){
-        const a=want+turn;let clear=0;
-        for(let step=1;step<=8;step++){if(W.blocked(me.x+Math.sin(a)*step*1.2,me.z+Math.cos(a)*step*1.2,.7))break;clear=step}
-        const score=clear*2-Math.abs(turn)*(stuck?.5:2.2);
-        if(score>best){best=score;yaw=a}
-      }
-      if(previous&&Math.hypot(me.x-previous.x,me.z-previous.z)<.04){stuck++;yaw+=stuck%2?1.2:-1.2}else stuck=0;
-      previous={x:me.x,z:me.z};
-      c.send({type:'input',data:{x:0,z:1,yaw,pitch:0,sprint:true,seq:seq.n++}});
+// The field is dense enough that steering at a goal no longer works: the walker plans a route
+// on a passability grid built once from the shared world, then follows the waypoints.
+const NAV_STEP=1.5,NAV_N=Math.floor(W.EDGE*2/NAV_STEP)+1;
+const navOpen=new Uint8Array(NAV_N*NAV_N);
+for(let iz=0;iz<NAV_N;iz++)for(let ix=0;ix<NAV_N;ix++)
+  navOpen[iz*NAV_N+ix]=W.blocked(-W.EDGE+ix*NAV_STEP,-W.EDGE+iz*NAV_STEP,.55)?0:1;
+const navCell=v=>Math.max(0,Math.min(NAV_N-1,Math.round((v+W.EDGE)/NAV_STEP)));
+const navWorld=i=>-W.EDGE+i*NAV_STEP;
+function nearestOpen(ix,iz){
+  if(navOpen[iz*NAV_N+ix])return iz*NAV_N+ix;
+  for(let ring=1;ring<10;ring++)for(let dz=-ring;dz<=ring;dz++)for(let dx=-ring;dx<=ring;dx++){
+    const x=ix+dx,z=iz+dz;
+    if(x<0||x>=NAV_N||z<0||z>=NAV_N)continue;
+    if(navOpen[z*NAV_N+x])return z*NAV_N+x;
+  }
+  return -1;
+}
+function planRoute(from,to){
+  const start=nearestOpen(navCell(from.x),navCell(from.z)),goal=nearestOpen(navCell(to.x),navCell(to.z));
+  if(start<0||goal<0)return null;
+  const parent=new Int32Array(NAV_N*NAV_N).fill(-2);parent[start]=-1;
+  const queue=[start];
+  for(let head=0;head<queue.length;head++){
+    const cell=queue[head];
+    if(cell===goal){const path=[];let node=goal;
+      while(node!==-1){path.unshift({x:navWorld(node%NAV_N),z:navWorld(Math.floor(node/NAV_N))});node=parent[node]}
+      return path}
+    const ix=cell%NAV_N,iz=Math.floor(cell/NAV_N);
+    for(const[dx,dz]of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]){
+      const x=ix+dx,z=iz+dz;
+      if(x<0||x>=NAV_N||z<0||z>=NAV_N)continue;
+      const next=z*NAV_N+x;
+      if(!navOpen[next]||parent[next]!==-2)continue;
+      if(dx&&dz&&(!navOpen[iz*NAV_N+x]||!navOpen[z*NAV_N+ix]))continue;
+      parent[next]=cell;queue.push(next);
     }
-    await new Promise(r=>setTimeout(r,50));
   }
   return null;
 }
-// The walker steers around cover now, so head for the nearest firearm whether or not it is in sight.
+// Budgeted by progress, not by a fixed tick count: snapshots arrive on the server's 100ms
+// cadence, so a loaded machine gets far fewer useful steps out of the same wall clock.
+async function walkTo(c,id,target,seq,reach=1.5,until=null){
+  let route=null,replan=0,previous=null,stuck=0;
+  for(let attempt=0;attempt<1600;attempt++){
+    const state=latest(c,m=>m.type==='state')?.snapshot;
+    const me=state?.players.find(p=>p.id===id);
+    if(me){
+      if(until&&until())return{x:me.x,z:me.z};
+      const goal=typeof target==='function'?target(state):target;
+      if(!goal)return null;
+      // Straight-line distance is not progress here: reaching a crate inside a hut means
+      // walking away from it and around to the door. Progress is the route shortening.
+      if(Math.hypot(goal.x-me.x,goal.z-me.z)<reach)return goal;
+      if(!route||replan--<=0){route=planRoute(me,goal);replan=40;if(route)route.push({x:goal.x,z:goal.z})}
+      if(route)while(route.length>1&&Math.hypot(route[0].x-me.x,route[0].z-me.z)<1.6)route.shift();
+      // No plan is not a dead end: head straight at the goal and try planning again shortly.
+      const step=(route&&route[0])||goal;
+      let yaw=Math.atan2(step.x-me.x,step.z-me.z);
+      if(previous&&Math.hypot(me.x-previous.x,me.z-previous.z)<.03){stuck++;yaw+=stuck%2?.9:-.9;if(stuck>6){route=null;stuck=0}}else stuck=0;
+      previous={x:me.x,z:me.z};
+      c.send({type:'input',data:{x:0,z:1,yaw,pitch:0,sprint:true,seq:seq.n++}});
+    }
+    await new Promise(r=>setTimeout(r,35));
+  }
+  return null;
+}
+// Guns only spawn indoors now, so head for the nearest firearm and go in through the door.
 const nearestWeapon=(state,me)=>state.loot.filter(l=>l.type==='weapon'&&!R.weapons[l.weapon].melee)
   .map(l=>({...l,d:Math.hypot(l.x-me.x,l.z-me.z)})).sort((a,b)=>a.d-b.d)[0];
+// Which building an item sits in, so the test can assert the indoor-only economy.
+const shellOf=(x,z)=>[...W.buildings,...W.depots].find(([bx,bz,bw,bd])=>Math.abs(x-bx)<=bw/2&&Math.abs(z-bz)<=bd/2)||null;
 async function exerciseRoom(t,store){const a=await server(store),b=await server(store);t.after(async()=>{await a.stop();await b.stop()});const one=client(a.url),two=client(b.url);await Promise.all([one.opened,two.opened]);one.send({type:'create',name:'Alpha'});const first=await one.wait(m=>m.type==='joined');assert.match(first.room,/^[A-Z2-9]{6}$/);two.send({type:'join',room:first.room,name:'Bravo'});const second=await two.wait(m=>m.type==='joined');assert.notEqual(first.id,second.id);await one.wait(m=>m.type==='state'&&m.snapshot.players.length===2);one.send({type:'action',action:'ready',data:true});two.send({type:'action',action:'ready',data:true});await one.wait(m=>m.type==='state'&&m.snapshot.players.every(p=>p.ready));one.send({type:'action',action:'start'});await Promise.all([one.wait(m=>m.type==='state'&&m.snapshot.phase==='playing'),two.wait(m=>m.type==='state'&&m.snapshot.phase==='playing')]);
 const beats=[one,two].map(c=>setInterval(()=>c.send({type:'ping',at:Date.now()}),1200));t.after(()=>beats.forEach(clearInterval));
 const seq={n:1},spawn=latest(one,m=>m.type==='state').snapshot.players.find(p=>p.id===first.id);
 assert.equal(latest(one,m=>m.type==='state').snapshot.me.equipped,'fists','a round starts bare-handed');
 // Walking to the gun proves movement replicates through the shared store as well.
-const target=await walkTo(one,first.id,state=>nearestWeapon(state,state.players.find(p=>p.id===first.id)),seq,2.2);
+const opening=latest(one,m=>m.type==='state').snapshot;
+const wanted=nearestWeapon(opening,opening.players.find(p=>p.id===first.id));
+assert.ok(wanted,'the map has to hand out firearms');
+assert.ok(shellOf(wanted.x,wanted.z),'every firearm spawns inside a building');
+const target=await walkTo(one,first.id,{x:wanted.x,z:wanted.z},seq,1.9);
 assert.ok(target,'player one reached a weapon on the randomised map, last position '+JSON.stringify(latest(one,m=>m.type==='state').snapshot.players.find(p=>p.id===first.id)));
 await two.wait(m=>m.type==='state'&&m.snapshot.players.some(p=>p.id===first.id&&Math.hypot(p.x-spawn.x,p.z-spawn.z)>3),12000);
 const firearm=()=>{const held=latest(one,m=>m.type==='state')?.snapshot.me.equipped;return held&&!R.weapons[held].melee&&held!=='fists'};
@@ -60,25 +108,25 @@ const attack=client(a.url);await attack.opened;attack.send({type:'reconnect',roo
 const inSight=()=>{const players=latest(again,m=>m.type==='state')?.snapshot.players||[];
   const me=players.find(p=>p.id===first.id),foe=players.find(p=>p.id===second.id);
   return !!(me&&foe&&W.visible({x:me.x,y:1.7,z:me.z},{x:foe.x,y:.84,z:foe.z}))};
-// Stand off on an arc around Bravo, tightening the circle until nothing is in the way.
-const closeIn=(angle,distance)=>walkTo(again,first.id,state=>{
-  const foe=state.players.find(p=>p.id===second.id),me=state.players.find(p=>p.id===first.id);
-  if(!foe||!me)return null;
-  const bearing=Math.atan2(me.x-foe.x,me.z-foe.z)+angle;
-  return{x:foe.x+Math.sin(bearing)*distance,z:foe.z+Math.cos(bearing)*distance}},seq,3);
-for(const[angle,distance]of [[0,20],[0,11],[.8,9],[-.8,9],[0,6],[1.6,6]]){
-  await closeIn(angle,distance);
-  if(inSight())break;
-}
-assert.ok(inSight(),'player one closed to a firing position with line of sight');
+// Bravo sits at its own drop point behind whatever cover the map gave it, so Alpha walks in
+// and shoots whenever the line is clear, rather than demanding a clean shot up front.
 let fired=0;
-while(fired<60&&!latest(again,m=>m.type==='state')?.snapshot.winner){
+const decided=()=>!!latest(again,m=>m.type==='state')?.snapshot.winner;
+const seqTwo={n:1};
+// Bravo closes in as well, so the duel does not hinge on one client crossing the whole field.
+const closing=Promise.all([
+  walkTo(again,first.id,state=>{const foe=state.players.find(p=>p.id===second.id);return foe?{x:foe.x,z:foe.z}:null},seq,3,decided),
+  walkTo(two,second.id,state=>{const foe=state.players.find(p=>p.id===first.id);return foe?{x:foe.x,z:foe.z}:null},seqTwo,3,decided)]);
+const deadline=Date.now()+90000;
+while(!decided()&&Date.now()<deadline){
   const players=latest(again,m=>m.type==='state')?.snapshot.players||[];
   const me=players.find(p=>p.id===first.id),foe=players.find(p=>p.id===second.id);
-  if(me&&foe){const dx=foe.x-me.x,dz=foe.z-me.z;
+  if(me&&foe&&inSight()){const dx=foe.x-me.x,dz=foe.z-me.z;
     again.send({type:'action',action:'shoot',data:{yaw:Math.atan2(dx,dz),pitch:Math.atan2(1.7-.84,Math.hypot(dx,dz))}});fired++}
-  await new Promise(r=>setTimeout(r,Math.max(140,R.weapons[gun].interval*1000+60)));
+  await new Promise(r=>setTimeout(r,Math.max(120,R.weapons[gun].interval*1000+50)));
 }
+await closing;
+assert.ok(fired>0,'Alpha never got a clear line on Bravo');
 const ended=await again.wait(m=>m.type==='state'&&m.snapshot.phase==='finished'&&m.snapshot.winner===first.id,12000);
 assert.ok(ended.snapshot.me.weapons[gun].ammo<R.weapons[gun].mag,'firing spent rounds');
 assert.equal((await two.wait(m=>m.type==='state'&&m.snapshot.me.hp===0,12000)).snapshot.me.hp,0);

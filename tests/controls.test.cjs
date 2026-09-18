@@ -83,3 +83,7 @@ test('the throwable buttons join the touch layout and stay on screen',()=>{
    assert.ok(x-r>=0&&x+r<=width,id+' horizontal');assert.ok(y-r>=0&&y+r<=height,id+' vertical')}
  }
 });
+
+test('jump, crouch and prone have keyboard defaults and movable phone buttons',()=>{const t=setup();for(const [action,key]of [['jump','Space'],['crouch','KeyC'],['prone','KeyZ']]){assert.equal(t.controls.code(action),key);assert.ok(t.els[action]);assert.ok(parseFloat(t.els[action].style.width)>=44)}t.els['open-controls'].onclick();bind(t,'jump','KeyJ');assert.equal(t.controls.actionFor('KeyJ'),'jump');assert.equal(t.controls.actionFor('Space'),null);for(const[width,height]of [[390,844],[844,390]]){t.scope.innerWidth=width;t.scope.innerHeight=height;for(const fn of t.listeners.resize)fn();for(const id of ['jump','crouch','prone']){const n=t.els[id],r=parseFloat(n.style.width)/2,x=parseFloat(n.style.left),y=parseFloat(n.style.top);assert.ok(x-r>=0&&x+r<=width);assert.ok(y-r>=0&&y+r<=height)}}});
+
+test('new posture bindings preserve previously saved custom keys',()=>{const t=setup({'last-field-controls-v2':JSON.stringify({keys:{collect:'KeyC',heal:'Space'}})});assert.equal(t.controls.code('collect'),'KeyC');assert.equal(t.controls.code('heal'),'Space');assert.notEqual(t.controls.code('crouch'),'KeyC');assert.notEqual(t.controls.code('jump'),'Space');assert.equal(new Set(Object.values(t.controls.getSettings().keys)).size,t.controls.actions.length)});

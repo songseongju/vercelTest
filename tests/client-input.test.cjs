@@ -9,10 +9,12 @@ const listeners={};function listen(type,fn){(listeners[type]??=[]).push(fn)};con
 const bytes=new Uint8Array(fs.readFileSync(require('node:path').join(__dirname,'../assets/soldier.glb')));
 const sandbox={console,Math,Map,Set,Float32Array,Int16Array,Uint8Array,performance:{now:()=>0},setTimeout,clearTimeout,window:{devicePixelRatio:1,BABYLON:true,BattleRules:require('../rules.js'),BattleWorld:require('../shared/world.js')},BABYLON:{...B,Engine:TestEngine,DynamicTexture:TestTexture,Texture:TestImage,SceneLoader:{LoadAssetContainerAsync:(_root,_name,scene)=>B.LoadAssetContainerAsync(bytes,scene,{pluginExtension:'.glb'})}},document:{getElementById:element,body:{classList:{toggle:noop,add:noop,remove:noop}},addEventListener:noop,querySelector:()=>element('desktop-help')},navigator:{},matchMedia:()=>({matches:true}),addEventListener:listen};
 const BOTS=23;
-test('client gameplay survives pointer-lock shooting and mobile controls',async(t)=>{sandbox.window.createFieldEnvironment=()=>({materials:{},quality:noop,mapBox:noop,tree:noop,surface:()=>new B.StandardMaterial('fixture')});const BINDINGS={collect:'KeyF',reload:'KeyR',heal:'Digit4',flash:'Digit5',frag:'Digit6',swap:'KeyQ',view:'KeyV',fists:'Digit1',melee:'Digit2',gun:'Digit3',forward:'KeyW',back:'KeyS',left:'KeyA',right:'KeyD',sprint:'ShiftLeft'};
+test('client gameplay survives pointer-lock shooting and mobile controls',async(t)=>{sandbox.window.createFieldEnvironment=()=>({materials:{},quality:noop,mapBox:noop,tree:noop,surface:()=>new B.StandardMaterial('fixture')});const BINDINGS={collect:'KeyF',reload:'KeyR',heal:'Digit4',flash:'Digit5',frag:'Digit6',swap:'KeyQ',view:'KeyV',fists:'Digit1',melee:'Digit2',gun:'Digit3',forward:'KeyW',back:'KeyS',left:'KeyA',right:'KeyD',sprint:'ShiftLeft',jump:'Space',crouch:'KeyC',prone:'KeyZ'};
 const KEYLABEL=code=>code.startsWith('Key')?code.slice(3):code.startsWith('Digit')?code.slice(5):code;
 sandbox.window.GameControls={isTouch:()=>true,keyLabel:a=>KEYLABEL(BINDINGS[a]||''),code:a=>BINDINGS[a],actionFor:code=>Object.keys(BINDINGS).find(a=>BINDINGS[a]===code)||null,connect:hooks=>hooks.changed()};vm.createContext(sandbox);vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../loot-visuals.js'),'utf8'),sandbox);vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../viewmodel.js'),'utf8'),sandbox);let src=fs.readFileSync(require('node:path').join(__dirname,'../game.js'),'utf8');src=src.replace('loadCharacters();','globalThis.characterLoading=loadCharacters();').replace(/\}\)\(\);\s*$/,'globalThis.api={run:code=>eval(code)};})();');vm.runInContext(src,sandbox);await sandbox.characterLoading;const run=sandbox.api.run;t.after(()=>run('scene.dispose();engine.dispose()'));assert.equal(run('charactersReady'),true);assert.equal(run('highQuality'),false);assert.equal(run('scene.shadowsEnabled'),false);assert.equal(run('engine.getHardwareScalingLevel()'),1);run('resetRound();scene.render()');assert.equal(run('enemies.length'),BOTS);assert.ok(run('enemies.every(e=>e.rig.Head&&e.rig.RightHand&&e.rig.LeftHand)'));assert.equal(run('new Set(enemies.map(e=>e.skeletons[0])).size'),BOTS,'independent skeletons');assert.equal(run('Object.keys(enemies[0].animations).length'),3);
 assert.equal(run("player.equipped"),'fists','everyone starts bare-handed');
+assert.ok(run("enemies.every(e=>e.equipped==='fists'&&!e.helmet&&!e.vest&&!e.frags)"),'and so do the bots');
+assert.ok(run("enemies.every(e=>!e.rifle.isEnabled()&&!e.blade.isEnabled())"),'nobody holds a gun at the drop');
 // Bare hands must fight: swing at a bot standing within arm's reach.
 run('enemies[0].root.position.set(0,0,-50);enemies[0].hp=100;enemies[0].armor=0;camera.position.set(0,1.7,-51.6);yaw=0;pitch=0;camera.rotation.set(0,0,0);shotTimer=0;scene.render();shoot()');
 assert.ok(run('enemies[0].hp<100'),'fists damage a bot in reach');assert.equal(run('player.reserve'),0,'fists consume no ammo');
@@ -113,6 +115,30 @@ run("player.blind=0;detonate({kind:'flash',x:camera.position.x+2,y:.5,z:camera.p
 assert.ok(run('player.blind')>0,'a flash at your feet blinds you');
 run("player.flashes=0;throwItem('flash')");
 assert.equal(run('grenades.length'),0,'an empty pouch throws nothing');
+// Impact roll must expire, even when the player changes pitch/yaw after the blast.
+run('resetRound();camera.position.set(0,1.7,-60);yaw=.3;pitch=.2;thirdPerson=false;recoil=0;detonate({kind:"flash",x:2,y:.5,z:-60});');
+assert.ok(run('shake')>0);
+run('for(let i=0;i<16;i++){clock+=.05;orientView(.05);camera.getViewMatrix(true)}');
+assert.equal(run('shake'),0);assert.equal(run('camera.rotation.z'),0);assert.equal(run('yaw'),.3);assert.equal(run('pitch'),.2);
+for(const [y,p]of [[2,.85],[-2,-.8],[0,0]]){
+ run(`yaw=${y};pitch=${p};orientView(.05);camera.getViewMatrix(true)`);
+ assert.ok(run('V.Distance(camera.upVector,V.TransformNormal(V.Up(),B.Matrix.RotationYawPitchRoll(yaw,pitch,0)))<.00001'),'view up vector follows the new aim after a blast');
+}
+run('shake=.07;pause();scene.render()');assert.equal(run('camera.rotation.z'),0);run('resume()');
+// Real key and touch handlers, not just the movement helper.
+const motionKey=code=>{for(const fn of listeners.keydown)fn({code,repeat:false,preventDefault(){}});for(const fn of listeners.keyup)fn({code});};
+motionKey('KeyC');run('tick(.05)');assert.equal(run('player.stance'),'crouch');assert.ok(run('camera.position.y<1.2'));
+motionKey('KeyC');assert.equal(run('player.stance'),'stand');
+motionKey('KeyZ');run('tick(.05)');assert.equal(run('player.stance'),'prone');assert.ok(run('camera.position.y<.6'));
+element('prone').onclick();assert.equal(run('player.stance'),'stand');
+motionKey('Space');run('tick(.05)');assert.ok(run('player.feet>0'));const velocity=run('player.vy');motionKey('Space');assert.equal(run('player.vy'),velocity);
+run('for(let i=0;i<22;i++)tick(.05)');assert.equal(run('player.grounded'),true);assert.equal(run('player.feet'),0);
+element('crouch').onclick();assert.equal(run('player.stance'),'crouch');element('jump').onclick();assert.equal(run('player.stance'),'stand');assert.ok(run('player.vy>0'));
+run('for(let i=0;i<22;i++)tick(.05);thirdPerson=true;motionAction("crouch");placeView(false);scene.render()');assert.ok(run('selfBody.posture.position.y<-.5'));
+run('motionAction("prone");placeView(false);scene.render()');assert.ok(run('selfBody.posture.rotation.x>1.5'));assert.ok(run('selfBody.rig.LeftFoot.getAbsolutePosition().y<.65&&selfBody.rig.RightFoot.getAbsolutePosition().y<.65'),'prone must release the bent crouch legs');
+run('motionAction("prone");placeView(false);scene.render()');assert.equal(run('selfBody.posture.rotation.x'),0);assert.equal(run('selfBody.posture.position.y'),0);
+run('thirdPerson=false;updateGun();placeView(false)');
+
 // Dying plays out too, then falls through to the defeat screen.
 run("resetRound();scene.render();player.blind=0;hurt(500,'테스트')");
 assert.equal(run('state'),'outro');
@@ -120,4 +146,23 @@ assert.equal(run("$('outro-tag').textContent"),'ELIMINATED');
 run('for(let i=0;i<120&&state==="outro";i++){tick(.05);scene.render()}');
 assert.equal(run('state'),'lost');
 assert.equal(run("$('outro').hidden"),true);
+// Supplies are indoors only, and a bot has to walk into a building to arm itself.
+run('resetRound();scene.render()');
+assert.ok(run("loot.length>60"),'the buildings are stocked');
+assert.ok(run("loot.every(l=>W.interiors.some(r=>Math.abs(l.x-r.x)<=r.w/2&&Math.abs(l.z-r.z)<=r.d/2))"),'nothing spawns in the open');
+assert.ok(run("scene.meshes.some(m=>m.name==='shelf deck')&&scene.meshes.some(m=>m.name==='locker body')"),'rooms are furnished');
+assert.ok(run("scene.meshes.filter(m=>m.name==='lamp tube').length>=W.interiors.length"),'every room is lit');
+// Stand a bot on a rifle: it should pick it up, hold it, and show it on the body.
+run("globalThis.scav=enemies[0];globalThis.shelved=loot.find(l=>l.type==='weapon'&&!R.melee(l.weapon)&&!l.taken);scav.root.position.set(shelved.x,0,shelved.z);scav.hunt=null;scav.huntTimer=5;scav.target=null");
+run('for(let i=0;i<8;i++){tick(.05);scene.render()}');
+assert.equal(run('shelved.taken'),true,'the bot took the rifle off the shelf');
+assert.equal(run('scav.equipped'),run('shelved.weapon'),'and is holding it');
+assert.equal(run('scav.rifle.isEnabled()'),true,'the rifle shows on the body');
+// Bare hands cannot reach across the map; an unarmed bot has to close in first.
+run("globalThis.brawler=enemies[1];brawler.equipped='fists';brawler.weapons={};brawler.hp=100;brawler.blind=0;brawler.attack=0;brawler.hunt=null;brawler.huntTimer=99;camera.position.set(brawler.root.position.x,1.7,brawler.root.position.z+34);time=40;globalThis.untouched=player.hp");
+run('for(let i=0;i<12;i++)tick(.05)');
+assert.equal(run('player.hp'),run('untouched'),'fists do nothing at thirty metres');
+// A dead bot hands its gear back to the field.
+run("globalThis.stock=loot.length;scav.helmet=100;scav.kits=1;die(scav,'player')");
+assert.ok(run('loot.length')>run('stock'),'a dead bot drops what it carried');
 console.log('PASS: fists, randomised loot, third-person camera, actual GLB load, 23 independent skeletons, idle/walk/run clips, posed hands/head bounds, head hit detection, loot/fire/reload, pause, corpse cleanup, restart without animation leaks, win.');});

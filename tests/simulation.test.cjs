@@ -15,7 +15,9 @@ const R=require('../rules.js');
 test('loot is scattered randomly, never inside geometry and never on top of a spawn',()=>{
   for(const seed of [3,11,404]){
     const items=W.loot(seed);
-    assert.ok(items.filter(i=>i.type==='weapon').length>=22,'a round must hold enough guns for sixteen players');
+    assert.ok(items.filter(i=>i.type==='weapon').length>=26,'a round must hold enough guns for two dozen fighters');
+    const indoors=i=>W.interiors.some(r=>Math.abs(i.x-r.x)<=r.w/2&&Math.abs(i.z-r.z)<=r.d/2);
+    assert.ok(items.every(indoors),'supplies only spawn inside buildings');
     assert.ok(items.some(i=>i.type==='frag')&&items.some(i=>i.type==='flash'),'both throwables have to appear on the map');
     assert.ok(items.every(i=>!W.blocked(i.x,i.z,.4)),'every item must be reachable');
     assert.ok(items.every(i=>W.spawns.every(([x,z])=>Math.hypot(i.x-x,i.z-z)>=13)),'nothing may drop at a spawn point');
@@ -35,7 +37,8 @@ test('every round moves the starter cache and nobody spawns holding a gun',()=>{
     assert.deepEqual(cache.map(l=>l.type).sort(),['ammo','helmet','med','vest','weapon']);
     const weapon=cache.find(l=>l.type==='weapon');
     const reach=Math.hypot(weapon.x-p.x,weapon.z-p.z);
-    assert.ok(reach>12&&reach<27,'the cache is a run away, not underfoot: '+reach.toFixed(1));
+    assert.ok(reach>13&&reach<42,'the cache is a building away, not underfoot: '+reach.toFixed(1));
+    assert.ok(W.interiors.some(r=>Math.abs(weapon.x-r.x)<=r.w/2&&Math.abs(weapon.z-r.z)<=r.d/2),'the starter cache is indoors');
     assert.ok(R.weapons[weapon.weapon]&&!R.weapons[weapon.weapon].melee);
     seen.add(weapon.x.toFixed(3)+','+weapon.z.toFixed(3));
   }
@@ -191,4 +194,38 @@ test('a snapshot carries ordnance in flight and survives a process move',()=>{
   assert.deepEqual(moved.snapshot('a'),snap);
   b.step(.05);moved.step(.05);
   assert.deepEqual(moved.snapshot('a'),b.snapshot('a'));
+});
+
+test('the open ground holds nothing, and every room is worth entering',()=>{
+  for(const seed of [2,77,900]){
+    const items=W.loot(seed);
+    const roomOf=i=>W.interiors.find(r=>Math.abs(i.x-r.x)<=r.w/2&&Math.abs(i.z-r.z)<=r.d/2);
+    assert.ok(items.every(roomOf),'nothing is left lying in the open');
+    const stocked=new Set(items.map(i=>W.interiors.indexOf(roomOf(i))));
+    assert.equal(stocked.size,W.interiors.length,'every building is stocked');
+    for(let index=0;index<W.interiors.length;index++){
+      const held=items.filter(i=>W.interiors.indexOf(roomOf(i))===index);
+      assert.ok(held.some(i=>i.type==='weapon'),'room '+index+' has to hold a gun');
+    }
+    // Depots are the reason to cross the map; a hut is a top-up.
+    for(const room of W.interiors.filter(r=>r.kind==='depot')){
+      const held=items.filter(i=>roomOf(i)===room);
+      assert.ok(held.length>=8,'a depot is a real haul, saw '+held.length);
+    }
+    assert.ok(items.every(i=>!W.blocked(i.x,i.z,.4)),'nothing spawns inside the shelving');
+  }
+});
+
+test('drop points keep clear of the buildings and of each other',()=>{
+  // Measured to a room's wall, not its centre: a depot is 26m across.
+  const wallGap=(x,z)=>Math.min(...W.interiors.map(r=>
+    Math.hypot(Math.max(0,Math.abs(x-r.x)-r.w/2),Math.max(0,Math.abs(z-r.z)-r.d/2))));
+  for(const [x,z] of W.spawns)
+    assert.ok(wallGap(x,z)>=14,'a drop must not open onto a full building: '+wallGap(x,z).toFixed(1));
+  const apart=Math.min(...W.spawns.flatMap((a,i)=>W.spawns.slice(i+1).map(b=>Math.hypot(a[0]-b[0],a[1]-b[1]))));
+  assert.ok(apart>=18,'two players must not land on top of each other: '+apart.toFixed(1));
+  for(const seed of [7,41,404]){
+    const closest=Math.min(...W.loot(seed).map(i=>Math.min(...W.spawns.map(([x,z])=>Math.hypot(i.x-x,i.z-z)))));
+    assert.ok(closest>=13,'no supply within 13m of a drop point, saw '+closest.toFixed(1));
+  }
 });

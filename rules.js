@@ -20,7 +20,7 @@ const START_RADIUS=118;
 function zoneAt(time){let remaining=Math.max(0,time),radius=START_RADIUS;for(let i=0;i<stages.length;i++){const s=stages[i];if(remaining<s.wait)return{radius,target:s.radius,phase:i+1,closing:false,seconds:s.wait-remaining,dps:s.dps};remaining-=s.wait;if(remaining<s.shrink){return{radius:radius+(s.radius-radius)*remaining/s.shrink,target:s.radius,phase:i+1,closing:true,seconds:s.shrink-remaining,dps:s.dps}}remaining-=s.shrink;radius=s.radius}return{radius:0,target:0,phase:5,closing:true,seconds:0,dps:24}}
 function outsideZone(x,z,zone){return Math.hypot(x,z)>zone.radius}
 function damage(actor,amount,bypassArmor=false,head=false){amount=Math.max(0,amount);const piece=head?'helmet':'vest';const absorbed=bypassArmor?0:Math.min(actor[piece]||0,amount*.65);actor[piece]=Math.max(0,(actor[piece]||0)-absorbed);actor.hp=Math.max(0,actor.hp-(amount-absorbed));return amount-absorbed}
-function newPlayer(){return{hp:100,helmet:0,vest:0,kits:0,frags:0,flashes:0,blind:0,reserve:0,weapons:{},equipped:'fists',kills:0}}
+function newPlayer(){return{stance:'stand',feet:0,vy:0,grounded:true,hp:100,helmet:0,vest:0,kits:0,frags:0,flashes:0,blind:0,reserve:0,weapons:{},equipped:'fists',kills:0}}
 // Fists are innate: always held, never loot, never dropped. Other melee weapons behave like guns.
 function melee(id){return weapons[id]?.melee===true}
 function innate(id){return weapons[id]?.innate===true}

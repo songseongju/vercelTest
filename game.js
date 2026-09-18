@@ -13,8 +13,9 @@ const camera=new B.FreeCamera('player',new V(-11,6,-61),scene);camera.minZ=.06;c
 // `camera` stays the player's eye and keeps driving movement, aiming and every gameplay query.
 // Third person only swaps which camera renders, so the authoritative shot ray never changes.
 const viewCam=new B.FreeCamera('shoulder',new V(-11,6,-61),scene);viewCam.minZ=.06;viewCam.maxZ=700;viewCam.fov=1.08;
+camera.updateUpVectorFromRotation=viewCam.updateUpVectorFromRotation=true;
 let thirdPerson=false,selfBody=null,netMoving=false;
-const sky=new B.HemisphericLight('daylight',new V(0,1,0),scene);sky.intensity=.32;sky.diffuse=new C(.8,.87,1);sky.groundColor=new C(.19,.18,.15);
+const sky=new B.HemisphericLight('daylight',new V(0,1,0),scene);sky.intensity=.46;sky.diffuse=new C(.8,.87,1);sky.groundColor=new C(.19,.18,.15);
 const sun=new B.DirectionalLight('sun',new V(-.6,-1,.4),scene);sun.position.set(40,65,-40);sun.intensity=2.1;sun.diffuse=new C(1,.91,.77);
 // A 208m field cannot afford a shadow pass over the whole map: keep a tight box around the player
 // so everything else is frustum-culled out of the shadow render.
@@ -32,6 +33,8 @@ function glow(name,hex,power){const m=new B.StandardMaterial(name,scene);m.diffu
 function stepEffects(dt){for(let i=effects.length-1;i>=0;i--){const fx=effects[i];fx.life-=dt;fx.update?.(fx,dt);if(fx.life<=0){fx.mesh.dispose(false,!!fx.own);effects.splice(i,1)}}}
 // Trim that neither stops a bullet nor casts a shadow is batched later into a handful of meshes.
 const decor=[];let batching=true;
+// Opt a mesh back out of the batch when it has to stay an object in its own right.
+function unbatched(mesh){const at=decor.indexOf(mesh);if(at>=0)decor.splice(at,1);return mesh}
 function box(name,x,y,z,w,h,d,m,solid=false,casts=true){const a=B.MeshBuilder.CreateBox(name,{width:w,height:h,depth:d},scene);a.position.set(x,y,z);a.material=m;fieldEnvironment.mapBox(a);a.receiveShadows=true;a.isPickable=solid;if(solid){obstacles.push({x,z,w:w/2,d:d/2});staticHits.add(a)}if(casts)shadow.addShadowCaster(a);else if(batching&&!solid)decor.push(a);return a}
 function occlude(m){m.isPickable=true;staticHits.add(m);return m}
 function cylinder(name,x,y,z,d,h,m){const a=B.MeshBuilder.CreateCylinder(name,{diameter:d,height:h,tessellation:10},scene);a.position.set(x,y,z);a.material=m;a.isPickable=false;shadow.addShadowCaster(a);return a}
@@ -249,6 +252,43 @@ for(const [cx,cz,cw,cd] of W.cargos){
   for(const s of [-1,1])box('container door',doorX,1.5,doorZ,along?.06:cw*.46,2.7,along?cd*.46:.06,M.steel,false,false).position[along?'z':'x']+=s*(along?cd:cw)*.24;
   for(const s of [-1,1]){const bar=B.MeshBuilder.CreateCylinder('door bar',{diameter:.09,height:2.6,tessellation:8},scene);bar.position.set(doorX+(along?-.08:s*cw*.2),1.5,doorZ+(along?s*cd*.2:-.08));bar.material=M.dark;bar.isPickable=false}
 }
+// Every supply crate is indoors, so the rooms get shelving to search and a lamp to see by.
+function fitting(x,z,w,d,h,kind){
+  if(kind==='shelf'||kind==='rack'){
+    const along=w>d,posts=Math.max(2,Math.round((along?w:d)/1.5));
+    for(let i=0;i<posts;i++){const t=i/(posts-1)-.5;
+      for(const side of [-1,1])box('shelf post',x+(along?t*w:side*d*.4),h/2,z+(along?side*d*.4:t*d),.08,h,.08,M.steel,false,false)}
+    const decks=kind==='rack'?4:3;
+    for(let i=0;i<decks;i++)box('shelf deck',x,.25+i*(h-.35)/(decks-1),z,w,.06,d,M.wood,false,i===decks-1);
+    for(let i=0;i<decks-1;i++)box('shelf crate',x+(i%2?w*.2:-w*.22),.45+i*(h-.35)/(decks-1),z,Math.min(w*.4,.9),.34,Math.min(d*.8,.6),i%2?M.dark:M.bark,false,false);
+  }else if(kind==='bench'){
+    box('bench top',x,h,z,w,.08,d,M.wood,false,true);
+    for(const sx of [-1,1])for(const sz of [-1,1])box('bench leg',x+sx*(w/2-.1),h/2,z+sz*(d/2-.1),.07,h,.07,M.steel,false,false);
+    box('bench tools',x,h+.12,z+d*.2,w*.5,.16,d*.3,M.dark,false,false);
+  }else if(kind==='locker'){
+    box('locker body',x,h/2,z,w,h,d,M.steel,false,true);
+    for(const side of [-1,1])box('locker door',x+side*w*.24,h/2,z-d/2-.03,w*.44,h-.12,.05,M.glass,false,false);
+    box('locker vent',x,h-.22,z-d/2-.05,w*.7,.12,.03,M.dark,false,false);
+  }else{
+    box('store crate',x,h/2,z,w,h,d,M.wood,false,true);
+    box('crate band',x,h*.62,z-d/2-.02,w,.09,.03,M.steel,false,false);
+    box('crate stencil',x,h*.35,z-d/2-.02,w*.45,.16,.02,M.yellow,false,false);
+  }
+  // One invisible box carries the collision and the bullet stop, matching the collider that
+  // shared/world.js registers for this fitting so the server and the client agree.
+  const hit=box('fitting body',x,h/2,z,w,h,d,M.dark,true,false);hit.visibility=0;
+}
+for(const args of W.fittings)fitting(...args);
+// A bare bulb per room: interiors are roofed, and nobody can loot what they cannot see.
+for(const room of W.interiors){
+  const height=room.kind==='depot'?4.9:3.2;
+  box('ceiling lamp',room.x,height,room.z,.9,.1,.34,M.dark,false,false);
+  unbatched(box('lamp tube',room.x,height-.08,room.z,.8,.07,.26,M.flash,false,false));
+  if(room.kind==='depot')for(const side of [-1,1]){
+    box('ceiling lamp',room.x+side*room.w*.3,height,room.z+side*room.d*.28,.9,.1,.34,M.dark,false,false);
+    unbatched(box('lamp tube',room.x+side*room.w*.3,height-.08,room.z+side*room.d*.28,.8,.07,.26,M.flash,false,false));
+  }
+}
 // --- surface wear and ground cover: dense visual detail that blocks nothing ---
 (function dressGround(){
   // Skipped wholesale when the environment pack is unavailable, and thinned out on phones.
@@ -276,6 +316,7 @@ for(const [cx,cz,cw,cd] of W.cargos){
   if(cover)for(let i=0;i<Math.round(1500*density);i++){
     const x=(rnd()*2-1)*102,z=(rnd()*2-1)*102;
     if(Math.hypot(x,z)<6||W.blocked(x,z,1.1))continue;
+    if(W.interiors.some(r=>Math.abs(x-r.x)<r.w/2+1.4&&Math.abs(z-r.z)<r.d/2+1.4))continue;
     if(Math.abs(x)<7||(z>4&&z<16))continue;
     const scale=.55+rnd()*.6;
     for(let card=0;card<2;card++){
@@ -335,23 +376,30 @@ function blocked(x,z,r=.4){return W.blocked(x,z,r)}
 function advance(p,dx,dz,r=.4){if(!blocked(p.x+dx,p.z,r))p.x+=dx;if(!blocked(p.x,p.z+dz,r))p.z+=dz}
 function visible(a,b){const delta=b.subtract(a),length=delta.length();if(length<.01)return true;const ray=new B.Ray(a,delta.scale(1/length),Math.max(0,length-.2));return !scene.pickWithRay(ray,m=>staticHits.has(m))?.hit}
 // A* on a shared collision grid keeps bots out of walls and sends them through doors.
-const cellSize=2.6,cols=80,origin=-104,nav=new Uint8Array(cols*cols);
-for(let z=0;z<cols;z++)for(let x=0;x<cols;x++)nav[z*cols+x]=blocked(origin+(x+.5)*cellSize,origin+(z+.5)*cellSize,.45)?1:0;
+// 1.4m cells: a hut doorway is 3.6m of gap, and a coarser grid simply walls the buildings shut.
+const cellSize=1.4,cols=Math.ceil(W.EDGE*2/cellSize),origin=-W.EDGE,nav=new Uint8Array(cols*cols);
+for(let z=0;z<cols;z++)for(let x=0;x<cols;x++)nav[z*cols+x]=blocked(origin+(x+.5)*cellSize,origin+(z+.5)*cellSize,.42)?1:0;
 function cell(p){return{x:Math.max(0,Math.min(cols-1,Math.floor((p.x-origin)/cellSize))),z:Math.max(0,Math.min(cols-1,Math.floor((p.z-origin)/cellSize)))}}
+// The search buffers are reused across calls and validated by a generation stamp, so two dozen
+// bots replanning every couple of seconds does not churn a megabyte of arrays per second.
+const cost=new Float32Array(cols*cols),parent=new Int32Array(cols*cols),seenAt=new Int32Array(cols*cols),doneAt=new Int32Array(cols*cols);
+let searchId=0;
 function route(from,to){const s=cell(from),g=cell(to),startIdx=s.z*cols+s.x;let end=g.z*cols+g.x;
- if(nav[end]){let best=Infinity;for(let dz=-3;dz<=3;dz++)for(let dx=-3;dx<=3;dx++){let x=g.x+dx,z=g.z+dz;if(x<0||x>=cols||z<0||z>=cols)continue;let i=z*cols+x;if(!nav[i]&&dx*dx+dz*dz<best){best=dx*dx+dz*dz;end=i}}}
+ if(nav[end]){let best=Infinity;for(let dz=-6;dz<=6;dz++)for(let dx=-6;dx<=6;dx++){let x=g.x+dx,z=g.z+dz;if(x<0||x>=cols||z<0||z>=cols)continue;let i=z*cols+x;if(!nav[i]&&dx*dx+dz*dz<best){best=dx*dx+dz*dz;end=i}}}
  if(nav[startIdx]||nav[end])return[];
- const cost=new Float32Array(cols*cols);cost.fill(Infinity);cost[startIdx]=0;const parent=new Int32Array(cols*cols);parent.fill(-1);const closed=new Uint8Array(cols*cols);
+ const id=++searchId;cost[startIdx]=0;seenAt[startIdx]=id;parent[startIdx]=-1;
  const gx=end%cols,gz=(end/cols)|0,heur=i=>Math.abs(i%cols-gx)+Math.abs(((i/cols)|0)-gz);
  // A binary heap keeps pathfinding cheap enough for two dozen bots on a 208m field.
  const heap=[],score=[];
  const push=(node,f)=>{heap.push(node);score.push(f);let i=heap.length-1;while(i>0){const p=(i-1)>>1;if(score[p]<=score[i])break;[heap[p],heap[i]]=[heap[i],heap[p]];[score[p],score[i]]=[score[i],score[p]];i=p}};
  const pop=()=>{const top=heap[0];const n=heap.pop(),f=score.pop();if(heap.length){heap[0]=n;score[0]=f;let i=0;for(;;){const l=i*2+1,r=l+1;let m=i;if(l<heap.length&&score[l]<score[m])m=l;if(r<heap.length&&score[r]<score[m])m=r;if(m===i)break;[heap[m],heap[i]]=[heap[i],heap[m]];[score[m],score[i]]=[score[i],score[m]];i=m}}return top};
  push(startIdx,heur(startIdx));let guard=0;
- while(heap.length&&guard++<9000){const current=pop();if(closed[current])continue;
+ while(heap.length&&guard++<26000){const current=pop();if(doneAt[current]===id)continue;
   if(current===end){const path=[];let n=end;while(n!==startIdx&&n>=0){path.unshift(new V(origin+(n%cols+.5)*cellSize,0,origin+(((n/cols)|0)+.5)*cellSize));n=parent[n]}return path}
-  closed[current]=1;const x=current%cols,z=(current/cols)|0;
-  for(const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]]){const xx=x+dx,zz=z+dz;if(xx<0||xx>=cols||zz<0||zz>=cols)continue;const n=zz*cols+xx;if(nav[n]||closed[n])continue;const c=cost[current]+1;if(c<cost[n]){cost[n]=c;parent[n]=current;push(n,c+heur(n))}}}
+  doneAt[current]=id;const x=current%cols,z=(current/cols)|0;
+  for(const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]]){const xx=x+dx,zz=z+dz;if(xx<0||xx>=cols||zz<0||zz>=cols)continue;
+   const n=zz*cols+xx;if(nav[n]||doneAt[n]===id)continue;const c=cost[current]+1;
+   if(seenAt[n]!==id||c<cost[n]){seenAt[n]=id;cost[n]=c;parent[n]=current;push(n,c+heur(n))}}}
  return[]}
 
 const lootVisuals=window.createLootVisuals(B,scene,M);
@@ -360,7 +408,9 @@ const halo=B.MeshBuilder.CreateTorus('supply ground ring',{diameter:1.12,thickne
 // A pickup is scenery, never a hit target, so collapse it to a single draw before it is placed.
 const parts=root.getChildMeshes();
 if(parts.length>1){const merged=B.Mesh.MergeMeshes(parts,true,true,undefined,false,true);if(merged){merged.name='supply drop '+type;merged.parent=root;merged.isPickable=false;merged.receiveShadows=true;shadow.addShadowCaster(merged)}}
-root.position.set(x,0,z);loot.push({type,x,z,weapon,amount,root,taken:false});return loot[loot.length-1]}
+root.position.set(x,0,z);
+const room=W.interiors.findIndex(r=>Math.abs(x-r.x)<=r.w/2+1.5&&Math.abs(z-r.z)<=r.d/2+1.5);
+loot.push({type,x,z,weapon,amount,root,room,taken:false});return loot[loot.length-1]}
 function populateLoot(spawn){for(const l of loot)l.root.dispose();loot.length=0;for(const item of W.loot()){const l=lootItem(item.type,item.x,item.z,item.weapon,item.amount);l.id=item.id}
 if(!spawn)return;
 // Solo gets the same guaranteed cache as an online round: a run away, in a direction that changes every time.
@@ -391,7 +441,7 @@ function detonate(g){
   const self={x:camera.position.x,z:camera.position.z,yaw,pitch};
   const near=Math.hypot(self.x-g.x,self.z-g.z);
   if(near<30)shake=Math.max(shake,.075*(1-near/30));
-  const mine=W.blastExposure(g,self);
+  self.stance=player.stance;self.feet=player.feet;const mine=W.blastExposure(g,self);
   if(mine.clear&&(state==='playing'||state==='outro')){
     const blinding=R.blastBlind(g.kind,mine.distance,W.facing(self,g));
     if(blinding>player.blind)player.blind=blinding;
@@ -409,7 +459,7 @@ function detonate(g){
   ui();
 }
 function launch(kind,x,z,yawTo,pitchTo,owner,power){
-  const g=W.throwGrenade(kind,x,1.52,z,yawTo,pitchTo,R.throwables[kind].fuse,power);
+  const g=W.throwGrenade(kind,x,owner==='player'?W.eyeHeight(player)-.15:1.52,z,yawTo,pitchTo,R.throwables[kind].fuse,power);
   g.owner=owner;g.mesh=grenadeMesh(kind);grenades.push(g);return g;
 }
 function updateGrenades(dt){
@@ -454,6 +504,30 @@ function poseHands(moving){
 const pressed=action=>keys.has(controls.code(action));
 let player=R.newPlayer(),state='ready',time=0,clock=0,zone=R.zoneAt(0),yaw=0,pitch=0,reloading=0,healing=0,shotTimer=0,recoil=0,hitTimer=0,damageFade=0,noticeTimer=0,feedTimer=0,held=false,ads=false,nearest=null,step=0,hudTimer=0;
 const keys=new Set(),move={x:0,y:0};let audio=null,soundOn=true,dragLook=null;const pointers={stick:null,look:null,fire:null};
+function motionAction(kind){
+  if(state!=='playing'||player.hp<=0||(netMode&&!netConnected))return;
+  player.x=camera.position.x;player.z=camera.position.z;player.yaw=yaw;
+  const next=kind==='jump'?null:W.stanceOf(player)===kind?'stand':kind;
+  const ok=kind==='jump'?W.jump(player):W.changeStance(player,next);
+  if(!ok){if(kind!=='jump')notify('공중이거나 머리 위·주변 공간이 부족합니다',1.5);return}
+  if(netMode)window.GameOnline.action(kind==='jump'?'jump':'stance',next);
+  ui();
+}
+function movePlayer(dt,x,z){
+  player.x=camera.position.x;player.z=camera.position.z;player.yaw=yaw;
+  W.stepMotion(player,{x,z,sprint:pressed('sprint'),aim:ads,healing:healing>0},dt);
+  camera.position.x=player.x;camera.position.z=player.z;
+  camera.position.y=W.eyeHeight(player)+(player.grounded&&Math.hypot(x,z)>.1?Math.sin(step)*.012:0);
+}
+// Babylon caches its up vector when roll changes. Recompute it with every new view rotation,
+// so an impact cannot leave a stale tilted axis after the player turns or looks up again.
+function orientView(dt){
+  shake=Math.max(0,shake-dt*.45);
+  camera.rotation.set(pitch-recoil*.2,yaw,0);
+  if(shake>0){camera.rotation.x+=Math.sin(clock*71)*shake;camera.rotation.y+=Math.sin(clock*53)*shake*.65;camera.rotation.z=Math.sin(clock*61)*shake*.45}
+  camera.cameraRotation.set(0,0);
+}
+
 function beep(freq,duration,volume=.07,type='sine'){if(!audio||!soundOn)return;const o=audio.createOscillator(),g=audio.createGain();o.type=type;o.frequency.setValueAtTime(freq,audio.currentTime);o.frequency.exponentialRampToValueAtTime(Math.max(20,freq*.5),audio.currentTime+duration);g.gain.setValueAtTime(volume,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+duration);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+duration)}
 function shotSound(volume=.2){if(!audio||!soundOn)return;const n=audio.createBuffer(1,Math.floor(audio.sampleRate*.12),audio.sampleRate),d=n.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*(1-i/d.length)**3;const s=audio.createBufferSource(),g=audio.createGain(),f=audio.createBiquadFilter();s.buffer=n;g.gain.value=volume;f.type='lowpass';f.frequency.value=1800;s.connect(f);f.connect(g);g.connect(audio.destination);s.start();beep(90,.09,volume*.5,'triangle')}
 function boom(volume=.3){if(!audio||!soundOn)return;const n=audio.createBuffer(1,Math.floor(audio.sampleRate*.9),audio.sampleRate),d=n.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*(1-i/d.length)**2.2;const src=audio.createBufferSource(),g=audio.createGain(),f=audio.createBiquadFilter();src.buffer=n;g.gain.value=volume;f.type='lowpass';f.frequency.setValueAtTime(900,audio.currentTime);f.frequency.exponentialRampToValueAtTime(90,audio.currentTime+.7);src.connect(f);f.connect(g);g.connect(audio.destination);src.start();beep(58,.6,volume*.7,'triangle')}
@@ -461,7 +535,7 @@ function audioStart(){try{if(!audio)audio=new(window.AudioContext||window.webkit
 function notify(text,seconds=2.5){$('notice').textContent=text;noticeTimer=seconds}
 function feed(text){$('killfeed').textContent=text;feedTimer=5}
 function inputMode(){document.body.classList.toggle('touch-mode',touch);$('inputmode').textContent=touch?'터치 조작':'마우스 조작'}inputMode();$('inputmode').onclick=()=>controls.toggleMode();$('sound').onclick=()=>{soundOn=!soundOn;$('sound').textContent='사운드 '+(soundOn?'ON':'OFF');if(soundOn)audioStart()};
-function clearInput(){keys.clear();held=ads=false;move.x=move.y=0;dragLook=null;pointers.stick=pointers.look=pointers.fire=null;$('knob').style.transform='translate(0,0)'}
+function clearInput(){shake=0;camera.cameraRotation.set(0,0);viewCam.cameraRotation.set(0,0);if(state!=='ready'){camera.rotation.set(pitch,yaw,0);camera.upVector.set(0,1,0);viewCam.rotation.z=0;viewCam.upVector.set(0,1,0)}keys.clear();held=ads=false;move.x=move.y=0;dragLook=null;pointers.stick=pointers.look=pointers.fire=null;$('knob').style.transform='translate(0,0)'}
 function lock(){if(touch||document.pointerLockElement===canvas)return;try{const p=canvas.requestPointerLock?.();p?.catch?.(()=>notify('마우스를 누른 채 드래그해 조준할 수도 있습니다',4))}catch{}}
 function format(t){const seconds=Math.max(0,Math.ceil(t));return String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0')}
 function thirdView(){return thirdPerson&&!ads&&(state==='playing'||state==='finished')}
@@ -479,7 +553,7 @@ function placeView(moving){
   viewCam.position.copyFrom(camera.position).addInPlace(delta.scale(reach/span));
   viewCam.rotation.copyFrom(camera.rotation);viewCam.fov=camera.fov;
   if(scene.activeCamera!==viewCam)scene.activeCamera=viewCam;
-  if(selfBody){selfBody.root.setEnabled(player.hp>0);selfBody.root.position.set(camera.position.x,0,camera.position.z);selfBody.root.rotation.y=yaw;dressSoldier(selfBody,{helmet:player.helmet>0,vest:player.vest>0,equipped:player.equipped});modelAnimation(selfBody,moving?'Run':'Idle')}
+  if(selfBody){selfBody.root.setEnabled(player.hp>0);selfBody.root.position.set(camera.position.x,player.feet||0,camera.position.z);selfBody.root.rotation.y=yaw;selfBody.stance=player.stance;dressSoldier(selfBody,{helmet:player.helmet>0,vest:player.vest>0,equipped:player.equipped});modelAnimation(selfBody,player.stance==='prone'?'Idle':moving?(player.stance==='crouch'?'Walk':'Run'):'Idle')}
 }
 // A round should not just stop. Death pulls the camera off the body; a win orbits it.
 function flare(center){
@@ -499,7 +573,7 @@ function startOutro(mode,done){
   ensureSelfBody();
   if(selfBody){
     selfBody.root.setEnabled(true);selfBody.root.position.set(outro.center.x,0,outro.center.z);selfBody.root.rotation.set(0,yaw,0);
-    dressSoldier(selfBody,{helmet:player.helmet>0,vest:player.vest>0,equipped:player.equipped});
+    selfBody.stance=player.stance;dressSoldier(selfBody,{helmet:player.helmet>0,vest:player.vest>0,equipped:player.equipped});
     selfBody.motion=null;modelAnimation(selfBody,'Idle');
     if(mode!=='win')for(const a of selfBody.animationGroups)a.pause();
   }
@@ -542,7 +616,7 @@ function quickSlots(){const melee=['knife','machete'].filter(id=>R.held(player,i
  return[['fists','맨손',true,player.equipped==='fists'],['melee',label(melee,'근접 없음'),!!melee.length,melee.includes(player.equipped)],
   ['gun',label(guns,'총기 없음'),!!guns.length,guns.includes(player.equipped)],
   ['heal','구급팩 '+player.kits,player.kits>0,false],['flash','섬광탄 '+(player.flashes||0),(player.flashes||0)>0,false],['frag','폭탄 '+(player.frags||0),(player.frags||0)>0,false]]}
-function ui(){const w=R.weapons[player.equipped],slot=player.weapons[player.equipped],out=R.outsideZone(camera.position.x,camera.position.z,zone);$('health').textContent=Math.ceil(player.hp);$('healthbar').style.width=player.hp+'%';$('healthbar').style.background=player.hp<30?'#f56f53':'#f1efdc';$('armor').textContent='헬멧 '+Math.ceil(player.helmet)+' · 조끼 '+Math.ceil(player.vest);$('helmetbar').style.width=player.helmet+'%';$('armorbar').style.width=player.vest+'%';$('kits').textContent=player.kits;$('ammo').textContent=slot?slot.ammo:'—';$('reserve').textContent=player.reserve;$('weapon').textContent=w?w.name+' / '+w.label:'맨손 · 무기를 찾으세요';$('reloadstatus').textContent=reloading>0?'재장전 중':healing>0?'치료 중':w?'공용 탄약':(touch?'획득 버튼으로 무기 확보':controls.keyLabel('collect')+'로 무기 획득');$('kills').textContent=player.kills;$('alive').textContent=netMode&&netState?netState.players.filter(p=>p.hp>0).length:enemies.length+(player.hp>0?1:0);$('phase').textContent='PHASE 0'+zone.phase;$('zonetimer').textContent=(zone.closing?'자기장 축소 중 ':'안전구역 축소까지 ')+format(zone.seconds);$('zonehint').textContent=out?'구역 밖! 초당 '+zone.dps+' 피해':'안전구역 반경 '+Math.round(zone.radius)+'m → '+zone.target+'m';$('zonehint').style.color=out?'#ffbb94':'#d1e1e6';$('zoneprogress').style.width=Math.max(0,zone.seconds/(zone.closing?R.stages[zone.phase-1].shrink:R.stages[zone.phase-1].wait)*100)+'%';$('slots').innerHTML=quickSlots().map(([action,text,has,active])=>`<span class="${active?'active':''}" style="opacity:${has?1:.42}">${controls.keyLabel(action)} ${text}</span>`).join('');$('meds').textContent=player.kits;$('flashes').textContent=player.flashes||0;$('frags').textContent=player.frags||0;$('flashcount').textContent=player.flashes||0;$('fragcount').textContent=player.frags||0;$('actionprogress').hidden=!(reloading||healing);$('actionprogress').textContent=healing?'치료 '+healing.toFixed(1)+'초':reloading?'재장전 '+reloading.toFixed(1)+'초':'';$('aim').style.borderColor=ads?'#efbf56':'';drawMap()}
+function ui(){const stance=W.stanceOf(player);$('posture-status').textContent=player.grounded===false?'공중':{stand:'서 있음',crouch:'앉음',prone:'엎드림'}[stance];for(const kind of ['crouch','prone'])$(kind).classList.toggle('selected',stance===kind);const w=R.weapons[player.equipped],slot=player.weapons[player.equipped],out=R.outsideZone(camera.position.x,camera.position.z,zone);$('health').textContent=Math.ceil(player.hp);$('healthbar').style.width=player.hp+'%';$('healthbar').style.background=player.hp<30?'#f56f53':'#f1efdc';$('armor').textContent='헬멧 '+Math.ceil(player.helmet)+' · 조끼 '+Math.ceil(player.vest);$('helmetbar').style.width=player.helmet+'%';$('armorbar').style.width=player.vest+'%';$('kits').textContent=player.kits;$('ammo').textContent=slot?slot.ammo:'—';$('reserve').textContent=player.reserve;$('weapon').textContent=w?w.name+' / '+w.label:'맨손 · 무기를 찾으세요';$('reloadstatus').textContent=reloading>0?'재장전 중':healing>0?'치료 중':w?'공용 탄약':(touch?'획득 버튼으로 무기 확보':controls.keyLabel('collect')+'로 무기 획득');$('kills').textContent=player.kills;$('alive').textContent=netMode&&netState?netState.players.filter(p=>p.hp>0).length:enemies.length+(player.hp>0?1:0);$('phase').textContent='PHASE 0'+zone.phase;$('zonetimer').textContent=(zone.closing?'자기장 축소 중 ':'안전구역 축소까지 ')+format(zone.seconds);$('zonehint').textContent=out?'구역 밖! 초당 '+zone.dps+' 피해':'안전구역 반경 '+Math.round(zone.radius)+'m → '+zone.target+'m';$('zonehint').style.color=out?'#ffbb94':'#d1e1e6';$('zoneprogress').style.width=Math.max(0,zone.seconds/(zone.closing?R.stages[zone.phase-1].shrink:R.stages[zone.phase-1].wait)*100)+'%';$('slots').innerHTML=quickSlots().map(([action,text,has,active])=>`<span class="${active?'active':''}" style="opacity:${has?1:.42}">${controls.keyLabel(action)} ${text}</span>`).join('');$('meds').textContent=player.kits;$('flashes').textContent=player.flashes||0;$('frags').textContent=player.frags||0;$('flashcount').textContent=player.flashes||0;$('fragcount').textContent=player.frags||0;$('actionprogress').hidden=!(reloading||healing);$('actionprogress').textContent=healing?'치료 '+healing.toFixed(1)+'초':reloading?'재장전 '+reloading.toFixed(1)+'초':'';$('aim').style.borderColor=ads?'#efbf56':'';drawMap()}
 const map=$('minimap').getContext('2d');function drawMap(){const size=320,s=size/222,c=size/2;map.clearRect(0,0,size,size);map.fillStyle='#455b46';map.fillRect(0,0,size,size);map.fillStyle='#84928a';
 for(const[x,z,w,d]of [[0,0,12,212],[0,10,212,10],[-56,0,8,212],[56,0,8,212],[0,-62,212,8],[0,64,212,8]])map.fillRect(c+(x-w/2)*s,c-(z+d/2)*s,w*s,d*s);map.fillStyle='#b3b7a6';for(const o of obstacles)map.fillRect(c+(o.x-o.w)*s,c-(o.z+o.d)*s,o.w*2*s,o.d*2*s);map.fillStyle='#196ccf50';map.beginPath();map.rect(0,0,size,size);map.arc(c,c,Math.max(0,zone.radius*s),0,Math.PI*2,true);map.fill('evenodd');map.strokeStyle='#68b7ff';map.lineWidth=3;map.beginPath();map.arc(c,c,Math.max(0,zone.radius*s),0,Math.PI*2);map.stroke();map.strokeStyle='#fff';map.lineWidth=2;map.setLineDash([7,5]);map.beginPath();map.arc(c,c,Math.max(0,zone.target*s),0,Math.PI*2);map.stroke();map.setLineDash([]);for(const l of loot)if(!l.taken){map.fillStyle=l.type==='weapon'?'#f5c65c':l.type==='frag'||l.type==='flash'?'#9fe08a':'#d5eadc';map.fillRect(c+l.x*s-1.5,c-l.z*s-1.5,3,3)}
 for(const g of grenades){map.fillStyle='#ff9c5c';map.fillRect(c+g.x*s-2,c-g.z*s-2,4,4)}map.save();map.translate(c+camera.position.x*s,c-camera.position.z*s);map.rotate(yaw);map.fillStyle='#fff';map.strokeStyle='#182b31';map.lineWidth=2;map.beginPath();map.moveTo(0,-9);map.lineTo(-6,6);map.lineTo(0,3);map.lineTo(6,6);map.closePath();map.fill();map.stroke();map.restore()}
@@ -568,11 +642,15 @@ function pointJoint(joint,child,target){const parent=joint.parent,inv=parent.get
 function solveArm(upper,lower,hand,target,pole){if(!upper||!lower||!hand)return;upper.computeWorldMatrix(true);lower.computeWorldMatrix(true);hand.computeWorldMatrix(true);const a=upper.getAbsolutePosition().clone(),b=lower.getAbsolutePosition().clone(),c=hand.getAbsolutePosition().clone(),l1=V.Distance(a,b),l2=V.Distance(b,c),delta=target.subtract(a),distance=Math.min(delta.length(),(l1+l2)*.97);if(distance<.001)return;const dir=delta.normalize(),perp=pole.subtract(a);perp.subtractInPlace(dir.scale(V.Dot(perp,dir))).normalize();const along=(l1*l1-l2*l2+distance*distance)/(2*distance),height=Math.sqrt(Math.max(0,l1*l1-along*along));const elbow=a.add(dir.scale(along)).add(perp.scale(height));pointJoint(upper,lower,elbow);hand.computeWorldMatrix(true);pointJoint(lower,hand,a.add(dir.scale(distance)))}
 // Two dozen rigs cannot each run IK every frame; distant soldiers keep their clip pose.
 function poseSoldier(e){if(!e.rig||!e.root.isEnabled())return;
+const stance=W.stanceOf(e);if(stance==='prone'||(e.lastStance==='crouch'&&stance!=='crouch'))for(const [name,rest]of Object.entries(e.legRest)){const joint=e.rig[name];joint.rotation.copyFrom(rest.rotation);joint.rotationQuaternion=rest.quaternion?.clone()||null}e.lastStance=stance;e.posture.position.set(0,stance==='crouch'?-.6:stance==='prone'?.38:0,stance==='prone'?-1.65:0);e.posture.rotation.x=stance==='prone'?Math.PI/2:0;e.posture.computeWorldMatrix(true);
 if(V.DistanceSquared(e.root.position,scene.activeCamera.position)>3600&&e!==selfBody&&e!==lobbySoldier)return;
-updateWorld(e);const world=e.root.getWorldMatrix(),local=p=>V.TransformCoordinates(p,world),bob=e.motion==='Idle'?0:Math.sin(e.phase)*.012;
-solveArm(e.rig.RightArm,e.rig.RightForeArm,e.rig.RightHand,local(new V(.14,1.27+bob,.31)),local(new V(.65,1.1,.02)));
-solveArm(e.rig.LeftArm,e.rig.LeftForeArm,e.rig.LeftHand,local(new V(-.07,1.29+bob,.57)),local(new V(-.6,1.08,.05)));
-e.rifle.position.y=1.29+bob;e.rifle.position.z=.42-(e.flashTime>0?.025:0);
+updateWorld(e);const world=e.posture.getWorldMatrix(),local=p=>V.TransformCoordinates(p,world),bob=e.motion==='Idle'?0:Math.sin(e.phase)*.012;
+const rootLocal=p=>V.TransformCoordinates(p,e.root.getWorldMatrix());
+if(stance==='crouch')for(const [side,sign]of [['Right',1],['Left',-1]])solveArm(e.rig[side+'UpLeg'],e.rig[side+'Leg'],e.rig[side+'Foot'],rootLocal(new V(sign*.14,.09,.02)),rootLocal(new V(sign*.18,.5,.6)));
+const held=(x,y,z)=>stance==='prone'?rootLocal(new V(x,.36,z)):local(new V(x,y,z));
+solveArm(e.rig.RightArm,e.rig.RightForeArm,e.rig.RightHand,held(.14,1.27+bob,.31),held(.65,1.1,.02));
+solveArm(e.rig.LeftArm,e.rig.LeftForeArm,e.rig.LeftHand,held(-.07,1.29+bob,.57),held(-.6,1.08,.05));
+e.rifle.rotation.x=stance==='prone'?-Math.PI/2:0;e.rifle.position.set(.12,1.29+bob,.42-(e.flashTime>0?.025:0));if(stance==='prone')e.rifle.position.copyFrom(V.TransformCoordinates(rootLocal(new V(.12,.36,.42)),world.clone().invert()));
 if(e.rig.Head){e.rig.Head.computeWorldMatrix(true);const center=e.rig.Head.getAbsolutePosition(),inv=world.clone().invert();e.headHit.position.copyFrom(V.TransformCoordinates(center,inv));e.headHit.position.y+=.08}
 const rootInverse=world.clone().invert();
 if(e.gearVest?.isEnabled()){if(e.socketChest)socketTo(e,e.gearVest,e.socketChest,VEST_REST,rootInverse);else e.gearVest.position.set(0,1.29+bob,0)}
@@ -586,13 +664,14 @@ function dressSoldier(e,{helmet,vest,equipped}){
   e.blade?.setEnabled(melee&&!R.innate(equipped));
 }
 function disposeSoldier(e){for(const a of e.animationGroups)a.dispose();for(const sk of e.skeletons)sk.dispose();e.root.dispose()}
-function makeSoldier(id,x,z){const root=new B.TransformNode('soldier '+id,scene);root.position.set(x,0,z);const e={id,root,hp:100,helmet:0,vest:0,equipped:'carbine',speed:2.4+Math.random()*.5,attack:2+Math.random()*2,phase:Math.random()*6,target:null,path:[],plan:Math.random(),rethink:Math.random(),fireCount:0,flashTime:0,motion:null,blind:0,frags:0,nadeTimer:99};
+function makeSoldier(id,x,z){const root=new B.TransformNode('soldier '+id,scene);root.position.set(x,0,z);const e={id,root,hp:100,helmet:0,vest:0,equipped:'carbine',speed:2.4+Math.random()*.5,attack:2+Math.random()*2,phase:Math.random()*6,target:null,path:[],plan:Math.random(),rethink:Math.random(),fireCount:0,flashTime:0,motion:null,blind:0,frags:0,kits:0,weapons:{},hunt:null,huntTimer:0,nadeTimer:99};
 const instance=soldierAssets.instantiateModelsToScene(name=>'bot'+id+'_'+name,false,{doNotInstantiate:true});e.animationGroups=instance.animationGroups;e.skeletons=instance.skeletons;e.model=new B.TransformNode('body rig',scene);e.model.parent=root;e.model.rotation.y=Math.PI;
 for(const node of instance.rootNodes){node.parent=e.model;node.setEnabled(true)}
 // Normalize height once; preserve the skinning rig and shared geometry/materials.
 let low=Infinity,high=-Infinity;for(const mesh of e.model.getChildMeshes()){mesh.computeWorldMatrix(true);if(mesh.getTotalVertices()){const b=mesh.getBoundingInfo().boundingBox;low=Math.min(low,b.minimumWorld.y);high=Math.max(high,b.maximumWorld.y)}}
 const scale=1.82/(high-low);e.model.scaling.setAll(scale);e.model.position.y=-low*scale;
-e.rig={};for(const node of e.model.getDescendants()){const name=node.name.split(':').pop();if(['Head','Neck','Spine','Spine1','Spine2','Hips','RightArm','RightForeArm','RightHand','LeftArm','LeftForeArm','LeftHand'].includes(name))e.rig[name]=node}
+e.rig={};for(const node of e.model.getDescendants()){const name=node.name.split(':').pop();if(['Head','Neck','Spine','Spine1','Spine2','Hips','RightUpLeg','RightLeg','RightFoot','LeftUpLeg','LeftLeg','LeftFoot','RightArm','RightForeArm','RightHand','LeftArm','LeftForeArm','LeftHand'].includes(name))e.rig[name]=node}
+e.legRest={};for(const side of ['Right','Left'])for(const part of ['UpLeg','Leg','Foot']){const name=side+part,joint=e.rig[name];if(joint)e.legRest[name]={rotation:joint.rotation.clone(),quaternion:joint.rotationQuaternion?.clone()}}
 for(const mesh of e.model.getChildMeshes()){mesh.isPickable=false;mesh.receiveShadows=true;mesh.alwaysSelectAsActiveMesh=true;if(mesh.getTotalVertices())shadow.addShadowCaster(mesh)}
 e.animations={};for(const a of e.animationGroups){const name=['Idle','Walk','Run'].find(n=>a.name.endsWith(n));if(name)e.animations[name]=a;for(const t of a.targetedAnimations){t.animation.enableBlending=true;t.animation.blendingSpeed=.12}}
 function hitbox(name,y,height,radius,head=false){const m=B.MeshBuilder.CreateCapsule(name,{height,radius,tessellation:8,subdivisions:1},scene);m.parent=root;m.position.y=y;m.visibility=0;m.isPickable=true;m.metadata={enemy:e,head};return m}
@@ -631,18 +710,62 @@ const heldGrip=B.MeshBuilder.CreateCylinder('held grip',{height:.17,diameter:.05
 heldGrip.parent=e.blade;heldGrip.rotation.x=Math.PI/2;heldGrip.position.z=-.09;heldGrip.material=M.grip;heldGrip.isPickable=false;
 e.blade.setEnabled(false);
 e.socketChest=boneRest(e,'Spine1')||boneRest(e,'Spine');e.socketHead=boneRest(e,'Head');
-const flash=B.MeshBuilder.CreateSphere('enemy muzzle flash',{diameter:.15,segments:5},scene);flash.parent=e.rifle;flash.position.set(0,.015,.57);flash.material=M.flash;flash.isPickable=false;flash.setEnabled(false);e.flash=flash;modelAnimation(e,'Idle');return e}
-const BOTS=23;
+const flash=B.MeshBuilder.CreateSphere('enemy muzzle flash',{diameter:.15,segments:5},scene);flash.parent=e.rifle;flash.position.set(0,.015,.57);flash.material=M.flash;flash.isPickable=false;flash.setEnabled(false);e.flash=flash;const parts=root.getChildren();e.posture=new B.TransformNode('body posture',scene);e.posture.parent=root;for(const part of parts)part.parent=e.posture;modelAnimation(e,'Idle');return e}
 // Drop points ring the field: the outer ring is shared with online spawns, the inner one fills the gaps.
-const botSpots=(()=>{const list=[];for(let i=1;i<W.spawns.length;i++)list.push(W.spawns[i]);
- for(let i=0;i<8;i++){const a=(i+.5)/8*Math.PI*2;let spot=[Math.sin(a)*70,Math.cos(a)*70];
-  for(let r=70;r>26&&W.blocked(spot[0],spot[1],1.4);r-=3)spot=[Math.sin(a)*r,Math.cos(a)*r];list.push(spot)}
- return list})();
+const BOTS=23;
+const botSpots=(()=>{
+  // Drop points were re-scored for the indoor economy and several sit well inside the old ring,
+  // so bot spots are picked with the same elbow room rather than laid on a fixed circle.
+  const list=[],taken=[W.spawns[0]];
+  const room=(x,z)=>taken.every(([tx,tz])=>Math.hypot(x-tx,z-tz)>=20);
+  for(let i=1;i<W.spawns.length;i++){const spot=W.spawns[i];if(!room(...spot))continue;list.push(spot);taken.push(spot)}
+  for(const ring of [72,58,86,44])for(let i=0;i<10&&list.length<BOTS;i++){
+    const a=(i+.5)/10*Math.PI*2+ring*.07;
+    for(let r=ring;r>30;r-=3){
+      const x=Math.sin(a)*r,z=Math.cos(a)*r;
+      if(W.blocked(x,z,1.6)||!room(x,z))continue;
+      list.push([x,z]);taken.push([x,z]);break;
+    }
+  }
+  return list})();
 function spawnBot(i){const p=botSpots[i%botSpots.length];
   const e=makeSoldier(i+1,p[0],p[1]);
-  e.helmet=Math.random()<.45?100:0;e.vest=Math.random()<.6?70:0;e.equipped=Math.random()<.18?'machete':'carbine';
-  e.frags=Math.random()<.45?1:0;e.nadeTimer=8+Math.random()*14;
+  // Nobody starts armed. Every gun on the field came out of a building.
+  e.helmet=0;e.vest=0;e.equipped='fists';e.frags=0;e.nadeTimer=10+Math.random()*16;
+  e.huntTimer=Math.random()*.8;e.nerve=.5+Math.random()*.6;
   dressSoldier(e,e);enemies.push(e)}
+// What a bot would cross the map for. A rifle beats fists by a mile; a second rifle is worthless.
+function botWants(e,l){
+  const bare=R.melee(e.equipped);
+  if(l.type==='weapon'){const w=R.weapons[l.weapon];if(!w)return 0;
+    if(!w.melee)return R.held(e,l.weapon)?0:bare?9:R.weapons[e.equipped].damage<w.damage?3:0;
+    return bare&&R.innate(e.equipped)?4:0}
+  if(l.type==='helmet')return e.helmet>0?0:3;
+  if(l.type==='vest')return e.vest>0?0:3;
+  if(l.type==='med')return e.kits>=2?0:1;
+  if(l.type==='frag')return e.frags>0?0:2;
+  return 0}
+// One bot per crate: a claim keeps two dozen of them from sprinting at the same rifle.
+function claimed(e,l){return l.claim&&l.claim!==e&&l.claim.hp>0&&l.claim.hunt===l}
+function botLootTarget(e){const p=e.root.position;let best=null,score=0;
+  // Count who is already headed for each building: two dozen bots should not all raid one hut.
+  const busy=new Map();
+  for(const other of enemies)if(other!==e&&other.hp>0&&other.hunt&&other.hunt.room>=0)
+    busy.set(other.hunt.room,(busy.get(other.hunt.room)||0)+1);
+  for(const l of loot){if(l.taken||claimed(e,l))continue;const want=botWants(e,l);if(!want)continue;
+    const reach=Math.hypot(p.x-l.x,p.z-l.z);if(reach>80)continue;
+    const value=want*14-reach-(busy.get(l.room)||0)*20;if(value>score){score=value;best=l}}
+  if(best)best.claim=e;
+  return best}
+function botCollect(e,l){
+  if(l.taken)return false;
+  if(l.type==='weapon'){const w=R.weapons[l.weapon];if(!w||w.innate)return false;e.weapons[l.weapon]={ammo:w.mag};e.equipped=l.weapon}
+  else if(l.type==='helmet')e.helmet=100;
+  else if(l.type==='vest')e.vest=100;
+  else if(l.type==='med')e.kits++;
+  else if(l.type==='frag')e.frags++;
+  else return false;
+  l.taken=true;l.root.setEnabled(false);dressSoldier(e,e);return true}
 // Bots lob with the same arc solver the physics uses, so the throw actually lands near the target.
 function botThrow(e,tp){const p=e.root.position,dx=tp.x-p.x,dz=tp.z-p.z,d=Math.hypot(dx,dz);
   const power=Math.min(28,Math.max(9,(-.354+Math.sqrt(.125+.152*d))/.076))*(.92+Math.random()*.16);
@@ -663,7 +786,10 @@ function end(won,cause=''){if(state!=='playing')return;
     $('screen-desc').textContent=`${player.kills}명 처치 · ${Math.floor(time)}초 생존. ${won?'전장의 마지막 생존자가 되었습니다.':cause+' 다음에는 엄폐물과 안전구역을 활용하세요.'}`;
     start.textContent='새 전장에 투입 →';ui()});}
 start.onclick=()=>netMode?(state==='paused'?netResume():window.GameOnline.open()):(state==='paused'?resume():resetRound());$('pause').onclick=pause;
-function die(e,killer){const index=enemies.indexOf(e);if(index<0)return;const p=e.root.position.clone();for(const a of e.animationGroups)a.pause();e.bodyHit.isPickable=false;e.headHit.isPickable=false;e.flash.setEnabled(false);corpses.push({e,age:0});enemies.splice(index,1);lootItem('ammo',p.x,p.z,null,30);if(Math.random()<.35)lootItem('med',p.x+.8,p.z);if(e.frags>0)lootItem('frag',p.x-.8,p.z);else if(Math.random()<.22)lootItem('flash',p.x-.8,p.z);if(killer==='player'){player.kills++;feed('YOU → BOT '+String(e.id).padStart(2,'0'));beep(470,.07,.07)}else feed((killer==='zone'?'자기장':killer)+' → BOT '+String(e.id).padStart(2,'0'));if(enemies.length===0&&player.hp>0)end(true);ui()}
+function die(e,killer){const index=enemies.indexOf(e);if(index<0)return;const p=e.root.position.clone();for(const a of e.animationGroups)a.pause();e.bodyHit.isPickable=false;e.headHit.isPickable=false;e.flash.setEnabled(false);corpses.push({e,age:0});enemies.splice(index,1);if(e.equipped&&!R.innate(e.equipped))lootItem('weapon',p.x,p.z,e.equipped);
+if(!R.melee(e.equipped))lootItem('ammo',p.x+.8,p.z,null,30);
+if(e.kits>0)lootItem('med',p.x,p.z+.8);if(e.helmet>0)lootItem('helmet',p.x-1.1,p.z);if(e.vest>0)lootItem('vest',p.x+1.1,p.z);
+if(e.frags>0)lootItem('frag',p.x,p.z-.8);if(killer==='player'){player.kills++;feed('YOU → BOT '+String(e.id).padStart(2,'0'));beep(470,.07,.07)}else feed((killer==='zone'?'자기장':killer)+' → BOT '+String(e.id).padStart(2,'0'));if(enemies.length===0&&player.hp>0)end(true);ui()}
 function hurt(amount,cause,zoneDamage=false,head=false){if(state!=='playing')return;R.damage(player,amount,zoneDamage,head);if(!zoneDamage){damageFade=.75;healing=0;beep(65,.08,.09,'sawtooth')}if(player.hp<=0)end(false,cause);ui()}
 function trace(a,b,color){const m=B.MeshBuilder.CreateLines('tracer',{points:[a,b]},scene);m.color=color;m.isPickable=false;effects.push({mesh:m,life:.12})}
 function impact(p){const m=B.MeshBuilder.CreateSphere('impact',{diameter:.09,segments:4},scene);m.position.copyFrom(p);m.material=M.yellow;m.isPickable=false;effects.push({mesh:m,life:.16})}
@@ -677,27 +803,64 @@ function swap(){const owned=Object.keys(R.weapons).filter(id=>R.held(player,id))
 function reload(){if(netMode){netAction('reload');return}const w=R.weapons[player.equipped],s=player.weapons[player.equipped];if(state!=='playing'||!w||reloading||s.ammo===w.mag)return;if(player.reserve<=0){notify('탄약이 없습니다. 보급품을 찾으세요',1.5);return}reloading=w.reload;healing=0;held=false;beep(280,.1,.04,'square');ui()}
 function heal(){if(netMode){netAction('heal');return}if(state!=='playing'||healing)return;if(!player.kits){notify('구급팩이 없습니다',1.5);return}if(player.hp>=100){notify('체력이 가득 찼습니다',1.5);return}healing=3;reloading=0;held=false;notify('치료 중 · 사격하거나 맞으면 취소됩니다',2);ui()}
 function shoot(){if(netMode){netShot();return}if(state!=='playing'||shotTimer>0||reloading)return;const w=R.weapons[player.equipped],s=player.weapons[player.equipped];if(!w){shotTimer=.5;return}const melee=w.melee===true;if(!melee){if(!s){shotTimer=.5;notify((touch?'획득 버튼':controls.keyLabel('collect'))+'으로 무기를 먼저 획득하세요',1.5);return}if(s.ammo<=0){reload();shotTimer=.2;return}s.ammo--;muzzle.setEnabled(true);shotSound()}else{swingHands();beep(R.innate(player.equipped)?180:300,.09,.05,'square')}healing=0;shotTimer=w.interval;recoil=melee?0:player.equipped==='marksman'?.075:.045;const ray=camera.getForwardRay(w.range);const pick=scene.pickWithRay(ray,m=>m.isPickable===true);const endPoint=pick?.hit?pick.pickedPoint:ray.origin.add(ray.direction.scale(w.range));if(!melee)trace(camera.position.add(new V(.1,-.1,0)),endPoint,new C(1,.85,.4));if(pick?.hit){const e=pick.pickedMesh.metadata?.enemy;if(e&&e.hp>0){const head=pick.pickedMesh.metadata.head;R.damage(e,w.damage*(head?(melee?1.5:2.5):1));hitTimer=.13;$('hitmarker').style.color=head?'#ffad52':'#fff';if(e.hp<=0)die(e,'player')}if(!melee)impact(pick.pickedPoint)}ui()}
+for(const kind of ['jump','crouch','prone'])$(kind).onclick=()=>motionAction(kind);
 $('loot').onclick=collect;$('pickup').onclick=collect;$('reload').onclick=reload;$('heal').onclick=heal;$('swap').onclick=swap;$('view').onclick=toggleView;$('aim').onclick=()=>{if(state==='playing')ads=!ads};$('flash').onclick=()=>throwItem('flash');$('frag').onclick=()=>throwItem('frag');
 function planBot(e,target){e.path=route(e.root.position,target);e.plan=1.5+Math.random()*.4}
-function updateBots(dt){for(const e of [...enemies]){if(state!=='playing')break;const p=e.root.position,oldX=p.x,oldZ=p.z;e.attack-=dt;e.plan-=dt;e.rethink-=dt;e.flashTime-=dt;e.nadeTimer-=dt;if(e.blind>0)e.blind=Math.max(0,e.blind-dt);e.flash.setEnabled(e.flashTime>0);if(R.outsideZone(p.x,p.z,zone)){R.damage(e,zone.dps*dt,true);if(e.hp<=0){die(e,'zone');continue}}
+function updateBots(dt){for(const e of [...enemies]){if(state!=='playing')break;const p=e.root.position,oldX=p.x,oldZ=p.z;e.attack-=dt;e.plan-=dt;e.rethink-=dt;e.flashTime-=dt;e.nadeTimer-=dt;e.huntTimer-=dt;if(e.blind>0)e.blind=Math.max(0,e.blind-dt);e.flash.setEnabled(e.flashTime>0);if(R.outsideZone(p.x,p.z,zone)){R.damage(e,zone.dps*dt,true);if(e.hp<=0){die(e,'zone');continue}}
 const unsafe=Math.hypot(p.x,p.z)>Math.max(1,zone.target-3),eye=new V(p.x,1.45,p.z);
+// Everyone lands empty-handed, so a bot's first job is to find a building and arm itself.
+if(e.hunt&&(e.hunt.taken||botWants(e,e.hunt)===0))e.hunt=null;
+if(e.huntTimer<=0){e.huntTimer=1.1+Math.random()*.9;const want=botLootTarget(e);if(want!==e.hunt){e.hunt=want;e.plan=0}}
+if(e.hunt&&Math.hypot(p.x-e.hunt.x,p.z-e.hunt.z)<1.8){if(botCollect(e,e.hunt))e.huntTimer=.25;e.hunt=null;e.plan=0}
+// Anything useful underfoot gets picked up, whatever the errand was: walking over a rifle
+// on the way to a helmet and leaving it there is not something a person would do.
+else for(const l of loot){if(l.taken||Math.hypot(p.x-l.x,p.z-l.z)>1.5||!botWants(e,l))continue;
+  if(botCollect(e,l)){e.huntTimer=.25;e.hunt=null;e.plan=0}break}
+const armed=!R.melee(e.equipped);
 if(e.rethink<=0){e.rethink=.4+Math.random()*.35;e.target=null;
  const candidates=[{id:'player',position:camera.position,actor:player},...enemies.filter(a=>a!==e).map(a=>({id:a.id,position:new V(a.root.position.x,1.45,a.root.position.z),actor:a}))]
   .filter(t=>t.actor.hp>0).map(t=>({...t,d:V.Distance(eye,t.position)})).filter(t=>t.d<52).sort((a,b)=>a.d-b.d).slice(0,6);
  for(const t of candidates)if(visible(eye,t.position)){e.target=t;break}}
 let target=e.target;if(target&&target.actor.hp<=0)target=e.target=null;let dest=new V(0,0,0),moving=true;const centerRadius=Math.min(zone.target*.65,25),angle=e.id*2.399;dest.set(Math.sin(angle)*centerRadius,0,Math.cos(angle)*centerRadius);
-if(target){const tp=target.id==='player'?camera.position:new V(target.actor.root.position.x,1.45,target.actor.root.position.z),d=V.Distance(eye,tp);e.root.rotation.y=Math.atan2(tp.x-p.x,tp.z-p.z);if(!unsafe&&d>14)dest=new V(tp.x,0,tp.z);else if(!unsafe){dest=new V(p.x+Math.cos(clock+e.id)*3,0,p.z+Math.sin(clock+e.id)*3);moving=false;if(e.plan<=0)planBot(e,dest)}if(e.frags>0&&e.nadeTimer<=0&&e.blind<=0&&d>11&&d<34&&time>12&&visible(eye,tp)){e.frags--;e.nadeTimer=16+Math.random()*12;botThrow(e,tp)}
-if(d<48&&e.attack<=0&&time>8&&e.blind<1.4&&visible(eye,tp)){e.attack=.75+Math.random()*.6;e.flashTime=.08;e.fireCount++;const hit=Math.random()<(target.id==='player'?.24:.4)*(d<18?1.4:1)*(e.blind>0?.25:1);const aim=tp.add(new V(hit?0:(Math.random()-.5)*2.4,hit?0:Math.random()*.9,0));trace(eye,aim,new C(1,.59,.23));if(V.Distance(eye,camera.position)<35)shotSound(.045);if(hit){if(target.id==='player')hurt(9,'적의 사격에 쓰러졌습니다.');else{R.damage(target.actor,13);if(target.actor.hp<=0)die(target.actor,'BOT '+e.id)}}}}
+const threat=target?V.Distance(eye,target.id==='player'?camera.position:new V(target.actor.root.position.x,1.45,target.actor.root.position.z)):Infinity;
+// Bare-handed with a rifle pointed at you is no time to be shopping, but at range the gun wins.
+const hostileArmed=target?!R.melee(target.id==='player'?player.equipped:target.actor.equipped):false;
+// Bare hands against a rifle is a losing trade, so keep shopping unless actually cornered.
+// Being caught outside the circle only cancels the errand if the errand is also outside it.
+const errandSafe=e.hunt&&Math.hypot(e.hunt.x,e.hunt.z)<Math.max(6,zone.target-4);
+const shopping=e.hunt&&(!unsafe||errandSafe)&&(!target||(!armed&&(threat>(hostileArmed?4:7)||e.hp<65))||(armed&&threat>34));
+if(shopping){dest=new V(e.hunt.x,0,e.hunt.z);if(e.plan<=0)planBot(e,dest)}
+if(target){const tp=target.id==='player'?camera.position:new V(target.actor.root.position.x,1.45,target.actor.root.position.z),d=V.Distance(eye,tp);e.root.rotation.y=Math.atan2(tp.x-p.x,tp.z-p.z);
+if(!shopping){
+  // Only run someone down with a gun in hand. Bare-handed, closing on an armed enemy across
+  // open ground is how two dozen bots wipe each other out before anyone has found a rifle.
+  const closeIn=armed?d>14:(!e.hunt&&!hostileArmed);
+  if(!unsafe&&closeIn)dest=new V(tp.x,0,tp.z);
+  else if(!unsafe){dest=new V(p.x+Math.cos(clock+e.id)*3,0,p.z+Math.sin(clock+e.id)*3);moving=false;if(e.plan<=0)planBot(e,dest)}
+}
+if(e.frags>0&&e.nadeTimer<=0&&e.blind<=0&&d>11&&d<34&&visible(eye,tp)){e.frags--;e.nadeTimer=16+Math.random()*12;botThrow(e,tp)}
+if(armed){
+  if(d<48&&e.attack<=0&&time>8&&e.blind<1.4&&visible(eye,tp)){e.attack=.75+Math.random()*.6;e.flashTime=.08;e.fireCount++;const hit=Math.random()<(target.id==='player'?.24:.4)*(d<18?1.4:1)*(e.blind>0?.25:1);const aim=tp.add(new V(hit?0:(Math.random()-.5)*2.4,hit?0:Math.random()*.9,0));trace(eye,aim,new C(1,.59,.23));if(V.Distance(eye,camera.position)<35)shotSound(.045);if(hit){if(target.id==='player')hurt(9,'적의 사격에 쓰러졌습니다.');else{R.damage(target.actor,13);if(target.actor.hp<=0)die(target.actor,'BOT '+e.id)}}}
+}else{
+  // Fists and blades: no tracer, no hitscan, you have to be standing on top of them.
+  const blade=R.weapons[e.equipped];
+  if(d<blade.range+.5&&e.attack<=0&&e.blind<1.4&&time>8&&visible(eye,tp)){
+    e.attack=blade.interval+.3;e.fireCount++;
+    if(V.Distance(eye,camera.position)<22)beep(R.innate(e.equipped)?180:300,.08,.04,'square');
+    if(target.id==='player')hurt(blade.damage,'근접 공격에 쓰러졌습니다.');
+    else{R.damage(target.actor,blade.damage);if(target.actor.hp<=0)die(target.actor,'BOT '+e.id)}
+  }
+}}
 else if(e.path.length)e.root.rotation.y=Math.atan2(e.path[0].x-p.x,e.path[0].z-p.z);
-if(e.plan<=0)planBot(e,dest);if(e.path.length){const next=e.path[0],dx=next.x-p.x,dz=next.z-p.z,d=Math.hypot(dx,dz);if(d<.65)e.path.shift();else{const speed=(unsafe?3.5:e.speed)*(moving?1:.55)*(e.blind>0?.55:1);advance(p,dx/d*speed*dt,dz/d*speed*dt,.36);e.phase+=dt*speed*4}}const actualSpeed=Math.hypot(p.x-oldX,p.z-oldZ)/Math.max(dt,.001);modelAnimation(e,actualSpeed>2.2?'Run':actualSpeed>.15?'Walk':'Idle')}}
+if(e.plan<=0)planBot(e,dest);if(e.path.length){const next=e.path[0],dx=next.x-p.x,dz=next.z-p.z,d=Math.hypot(dx,dz);if(d<.65)e.path.shift();else{const speed=(unsafe?3.5:e.speed*(shopping&&!target?1.5:1))*(moving?1:.55)*(e.blind>0?.55:1);advance(p,dx/d*speed*dt,dz/d*speed*dt,.36);e.phase+=dt*speed*4}}const actualSpeed=Math.hypot(p.x-oldX,p.z-oldZ)/Math.max(dt,.001);modelAnimation(e,actualSpeed>2.2?'Run':actualSpeed>.15?'Walk':'Idle')}}
 function tick(dt){clock+=dt;if(state==='outro'){outroTick(dt);return}if(netMode){netTick(dt);return}if(state==='ready'){camera.rotation.y=.02+Math.sin(clock*.08)*.015;return}if(state!=='playing')return;time+=dt;const previous=zone;zone=R.zoneAt(time);if(zone.phase!==previous.phase)notify('자기장 '+zone.phase+'단계 · 다음 원으로 이동하세요',3);else if(zone.closing&&!previous.closing){notify('자기장이 좁아집니다!',3);beep(230,.6,.08)}wall.scaling.set(Math.max(.001,zone.radius),1,Math.max(.001,zone.radius));zoneRing.scaling.set(zone.radius,1,zone.radius);nextRing.scaling.set(zone.target,1,zone.target);$('zonewash').style.opacity=R.outsideZone(camera.position.x,camera.position.z,zone)?'.9':'0';if(R.outsideZone(camera.position.x,camera.position.z,zone))hurt(zone.dps*dt,'자기장 밖에서 쓰러졌습니다.',true);if(state!=='playing')return;
 shotTimer=Math.max(0,shotTimer-dt);punchTimer=Math.max(0,punchTimer-dt);throwTimer=Math.max(0,throwTimer-dt);recoil=Math.max(0,recoil-dt*.55);damageFade=Math.max(0,damageFade-dt*1.8);hitTimer=Math.max(0,hitTimer-dt);noticeTimer-=dt;feedTimer-=dt;if(noticeTimer<=0)$('notice').textContent='';if(feedTimer<=0)$('killfeed').textContent='';$('damage').style.opacity=damageFade;$('hitmarker').style.opacity=hitTimer>0?1:0;muzzle.setEnabled(recoil>.025);
 if(player.blind>0)player.blind=Math.max(0,player.blind-dt);$('flashwash').style.opacity=String(Math.min(1,(player.blind||0)/1.6));
 if(reloading>0){reloading-=dt;if(reloading<=0){reloading=0;R.reload(player);beep(420,.06,.04,'square');ui()}}
 if(healing>0){healing-=dt;if(healing<=0){healing=0;R.heal(player);beep(650,.15,.06);ui()}}
-let mx=(pressed('right')?1:0)-(pressed('left')?1:0)+move.x,mz=(pressed('forward')?1:0)-(pressed('back')?1:0)-move.y,length=Math.hypot(mx,mz);if(length>1){mx/=length;mz/=length}const speed=healing?1.8:ads?2.7:pressed('sprint')?7:4.8;advance(camera.position,(mx*Math.cos(yaw)+mz*Math.sin(yaw))*speed*dt,(-mx*Math.sin(yaw)+mz*Math.cos(yaw))*speed*dt);if(length>.1)step+=dt*10;camera.position.y=1.7+(length>.1?Math.sin(step)*.02:0);followSun(camera.position);camera.rotation.set(pitch-recoil*.2,yaw,0);if(shake>0){camera.rotation.x+=(Math.random()-.5)*shake;camera.rotation.y+=(Math.random()-.5)*shake;camera.rotation.z=(Math.random()-.5)*shake*.7;shake=Math.max(0,shake-dt*1.7);if(!shake)camera.rotation.z=0}camera.fov+=((ads&&!R.melee(player.equipped)?(player.equipped==='marksman'?.45:.7):1.08)-camera.fov)*Math.min(1,dt*12);viewRig.pose({dt,moving:length>.1,step,time,yaw,pitch,ads,recoil,reloading,healing});poseHands(length>.1);placeView(length>.1);
+let mx=(pressed('right')?1:0)-(pressed('left')?1:0)+move.x,mz=(pressed('forward')?1:0)-(pressed('back')?1:0)-move.y,length=Math.hypot(mx,mz);if(length>1){mx/=length;mz/=length}movePlayer(dt,mx,mz);if(length>.1)step+=dt*10;followSun(camera.position);orientView(dt);camera.fov+=((ads&&!R.melee(player.equipped)?(player.equipped==='marksman'?.45:.7):1.08)-camera.fov)*Math.min(1,dt*12);viewRig.pose({dt,moving:length>.1,step,time,yaw,pitch,ads,recoil,reloading,healing});poseHands(length>.1);placeView(length>.1);
 if(held)shoot();updateGrenades(dt);if(state!=='playing')return;updateBots(dt);for(let i=corpses.length-1;i>=0;i--){const c=corpses[i];c.age+=dt;c.e.root.rotation.x=-Math.min(1,c.age/.45)*Math.PI/2;if(c.age>5){disposeSoldier(c.e);corpses.splice(i,1)}}stepEffects(dt);hudTimer-=dt;if(hudTimer<=0){searchLoot();ui();hudTimer=.12}}
-const keyActions={collect,reload,heal,swap,view:toggleView,fists:()=>equip('fists'),melee:equipMelee,gun:equipGun,flash:()=>throwItem('flash'),frag:()=>throwItem('frag')};
+const keyActions={jump:()=>motionAction('jump'),crouch:()=>motionAction('crouch'),prone:()=>motionAction('prone'),collect,reload,heal,swap,view:toggleView,fists:()=>equip('fists'),melee:equipMelee,gun:equipGun,flash:()=>throwItem('flash'),frag:()=>throwItem('frag')};
 addEventListener('keydown',e=>{if(controls.modalOpen||controls.editing||window.GameOnline?.modalOpen)return;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat)return;if(e.code==='Escape'){pause();return}keyActions[controls.actionFor(e.code)]?.()});addEventListener('keyup',e=>keys.delete(e.code));
 canvas.addEventListener('pointerdown',e=>{if(state!=='playing'||touch)return;if(e.button===2){ads=true;return}if(e.button!==0)return;held=true;if(netMode)netShot();dragLook={x:e.clientX,y:e.clientY};lock()});addEventListener('pointerup',e=>{if(touch)return;if(e.button===2)ads=false;if(e.button===0){held=false;dragLook=null}});canvas.addEventListener('pointercancel',clearInput);canvas.addEventListener('contextmenu',e=>e.preventDefault());addEventListener('mousemove',e=>{if(state!=='playing'||touch)return;const sensitivity=ads?.0013:.0024;if(document.pointerLockElement===canvas){yaw+=e.movementX*sensitivity;pitch+=e.movementY*sensitivity}else if(dragLook){yaw+=(e.clientX-dragLook.x)*.004;pitch+=(e.clientY-dragLook.y)*.004;dragLook={x:e.clientX,y:e.clientY}}pitch=Math.max(-1.25,Math.min(1.25,pitch))});document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement&&state==='playing'&&!touch)pause()});addEventListener('blur',pause);document.addEventListener('visibilitychange',()=>{if(document.hidden)pause()});
 function pad(node,type,down,onMove,up){node.addEventListener('pointerdown',e=>{if(state!=='playing'||pointers[type]!==null)return;e.preventDefault();pointers[type]=e.pointerId;controls.capturePointer(node,e.pointerId);down(e)});addEventListener('pointermove',e=>{if(pointers[type]===e.pointerId)onMove(e)});for(const n of ['pointerup','pointercancel','lostpointercapture'])addEventListener(n,e=>{if(pointers[type]===e.pointerId){pointers[type]=null;up()}})}
@@ -715,10 +878,10 @@ function netThrow(kind){if(state!=='playing'||!netConnected||throwTimer>0)return
 function netShot(){if(state!=='playing')return;const weapon=R.weapons[player.equipped],slot=player.weapons[player.equipped];if(shotTimer>0||reloading||!netConnected)return;if(!weapon){shotTimer=.5;return}if(weapon.melee){window.GameOnline.action('shoot',{yaw,pitch});shotTimer=weapon.interval;swingHands();beep(R.innate(player.equipped)?180:300,.09,.05,'square');return}if(!slot){shotTimer=.5;notify((touch?'획득 버튼':controls.keyLabel('collect'))+'으로 무기를 확보하세요',1);return}if(slot.ammo<=0){netAction('reload');shotTimer=.3;return}window.GameOnline.action('shoot',{yaw,pitch});shotTimer=weapon.interval;recoil=player.equipped==='marksman'?.075:.045;shotSound()}
 function netSnapshot(s,id,events){
   netState=s;netSequence=Math.max(netSequence,s.me?.seq||0);netConnected=true;$('network-status').textContent='';const me=s.players.find(p=>p.id===id);if(!me||!s.me)return;
-  if(s.round!==netRound&&s.phase!=='lobby'&&s.phase!=='countdown'){netClearActors();outro=null;$('outro').hidden=true;$('flashwash').style.opacity=0;netRound=s.round;netSequence=s.me.seq||0;camera.position.set(me.x,1.7,me.z);yaw=me.yaw;pitch=me.pitch;camera.rotation.set(pitch,yaw,0);if(lobbySoldier){lobbySoldier.root.setEnabled(false);for(const a of lobbySoldier.animationGroups)a.stop()}$('hud').hidden=false;$('killfeed').textContent='';clearInput();}
+  if(s.round!==netRound&&s.phase!=='lobby'&&s.phase!=='countdown'){netClearActors();outro=null;$('outro').hidden=true;$('flashwash').style.opacity=0;netRound=s.round;netSequence=s.me.seq||0;camera.position.set(me.x,W.eyeHeight(me),me.z);yaw=me.yaw;pitch=me.pitch;camera.rotation.set(pitch,yaw,0);if(lobbySoldier){lobbySoldier.root.setEnabled(false);for(const a of lobbySoldier.animationGroups)a.stop()}$('hud').hidden=false;$('killfeed').textContent='';clearInput();}
   const oldHP=player.hp,oldWeapon=player.equipped;player={...s.me,weapons:JSON.parse(JSON.stringify(s.me.weapons))};time=s.time;zone=R.zoneAt(time);reloading=s.me.reload;healing=s.me.heal;netTarget={x:me.x,z:me.z};if(oldWeapon!==player.equipped)updateGun();if(player.hp<oldHP&&s.phase==='playing')damageFade=.7;
   if(s.phase==='playing'||s.phase==='finished'){
-    const present=new Set();for(const p of s.players){if(p.id===id)continue;present.add(p.id);let e=netPeers.get(p.id);if(!e){e=makeSoldier('peer-'+p.id,p.x,p.z);e.bodyHit.isPickable=e.headHit.isPickable=false;e.netPosition=new V(p.x,0,p.z);e.netYaw=p.yaw;netPeers.set(p.id,e)}e.netPosition.set(p.x,0,p.z);e.netYaw=p.yaw;e.hp=p.hp;dressSoldier(e,p);if(p.hp<=0){for(const a of e.animationGroups)a.pause();e.root.rotation.x=-Math.PI/2;e.flash.setEnabled(false)}}
+    const present=new Set();for(const p of s.players){if(p.id===id)continue;present.add(p.id);let e=netPeers.get(p.id);if(!e){e=makeSoldier('peer-'+p.id,p.x,p.z);e.bodyHit.isPickable=e.headHit.isPickable=false;e.netPosition=new V(p.x,0,p.z);e.netYaw=p.yaw;netPeers.set(p.id,e)}e.netPosition.set(p.x,p.feet||0,p.z);e.netYaw=p.yaw;e.stance=p.stance;e.hp=p.hp;dressSoldier(e,p);if(p.hp<=0){for(const a of e.animationGroups)a.pause();e.root.rotation.x=-Math.PI/2;e.flash.setEnabled(false)}}
     for(const[id,e]of netPeers)if(!present.has(id)){disposeSoldier(e);netPeers.delete(id)}
     const remaining=new Map(s.loot.map(l=>[l.id,l]));for(let i=loot.length-1;i>=0;i--){const l=loot[i];if(!remaining.has(l.id)){l.root.dispose();loot.splice(i,1)}else remaining.delete(l.id)}for(const l of remaining.values()){const item=lootItem(l.type,l.x,l.z,l.weapon,l.amount);item.id=l.id}
     const flying=new Set();for(const g of s.grenades||[]){flying.add(g.id);let mesh=netNades.get(g.id);if(!mesh){mesh=grenadeMesh(g.kind);netNades.set(g.id,mesh)}mesh.position.set(g.x,g.y,g.z);mesh.rotation.set(mesh.rotation.x+.22,mesh.rotation.y+.16,mesh.rotation.z+.1)}
@@ -734,12 +897,12 @@ function netSnapshot(s,id,events){
   if(event.type==='death')feed(event.killerName+' → '+event.name);if(event.type==='collect'&&event.id===id){notify('보급품 획득',1.3);beep(710,.08,.06)}}
 }
 function netTick(dt){
-  for(const e of netPeers.values()){if(e.hp<=0)continue;const old=e.root.position.clone();e.root.position=V.Lerp(e.root.position,e.netPosition,Math.min(1,dt*12));const angle=Math.atan2(Math.sin(e.netYaw-e.root.rotation.y),Math.cos(e.netYaw-e.root.rotation.y));e.root.rotation.y+=angle*Math.min(1,dt*12);e.phase+=dt*8;modelAnimation(e,V.Distance(old,e.root.position)/Math.max(dt,.001)>.15?'Run':'Idle');e.flashTime=Math.max(0,e.flashTime-dt);e.flash.setEnabled(e.flashTime>0)}
+  for(const e of netPeers.values()){if(e.hp<=0)continue;const old=e.root.position.clone();e.root.position=V.Lerp(e.root.position,e.netPosition,Math.min(1,dt*12));const angle=Math.atan2(Math.sin(e.netYaw-e.root.rotation.y),Math.cos(e.netYaw-e.root.rotation.y));e.root.rotation.y+=angle*Math.min(1,dt*12);e.phase+=dt*8;modelAnimation(e,e.stance==='prone'?'Idle':V.Distance(old,e.root.position)/Math.max(dt,.001)>.15?(e.stance==='crouch'?'Walk':'Run'):'Idle');e.flashTime=Math.max(0,e.flashTime-dt);e.flash.setEnabled(e.flashTime>0)}
   shotTimer=Math.max(0,shotTimer-dt);punchTimer=Math.max(0,punchTimer-dt);throwTimer=Math.max(0,throwTimer-dt);if(player.blind>0)player.blind=Math.max(0,player.blind-dt);$('flashwash').style.opacity=String(Math.min(1,(player.blind||0)/1.6));recoil=Math.max(0,recoil-dt*.55);damageFade=Math.max(0,damageFade-dt*1.8);hitTimer=Math.max(0,hitTimer-dt);noticeTimer-=dt;feedTimer-=dt;if(noticeTimer<=0)$('notice').textContent='';if(feedTimer<=0)$('killfeed').textContent='';$('damage').style.opacity=damageFade;$('hitmarker').style.opacity=hitTimer>0?1:0;muzzle.setEnabled(recoil>.025);
-  if(state==='playing'&&netConnected){let mx=(pressed('right')?1:0)-(pressed('left')?1:0)+move.x,mz=(pressed('forward')?1:0)-(pressed('back')?1:0)-move.y;const len=Math.hypot(mx,mz);if(len>1){mx/=len;mz/=len}netMoving=len>.1;const speed=healing?1.8:ads?2.7:pressed('sprint')?7:4.8;W.move(camera.position,(mx*Math.cos(yaw)+mz*Math.sin(yaw))*speed*dt,(-mx*Math.sin(yaw)+mz*Math.cos(yaw))*speed*dt);if(held)netShot();}
+  if(state==='playing'&&netConnected){let mx=(pressed('right')?1:0)-(pressed('left')?1:0)+move.x,mz=(pressed('forward')?1:0)-(pressed('back')?1:0)-move.y;const len=Math.hypot(mx,mz);if(len>1){mx/=len;mz/=len}netMoving=len>.1;movePlayer(dt,mx,mz);if(held)netShot();}
   if(netTarget&&netState?.phase==='playing'){const d=Math.hypot(camera.position.x-netTarget.x,camera.position.z-netTarget.z);const factor=d>2?1:Math.min(1,dt*5);camera.position.x+=(netTarget.x-camera.position.x)*factor;camera.position.z+=(netTarget.z-camera.position.z)*factor;}
   followSun(camera.position);
-  if(netState?.phase==='playing'||netState?.phase==='finished'){camera.position.y=1.7;camera.rotation.set(pitch-recoil*.2,yaw,0);camera.fov+=((ads&&!R.melee(player.equipped)?(player.equipped==='marksman'?.45:.7):1.08)-camera.fov)*Math.min(1,dt*12);if(netMoving)step+=dt*10;viewRig.pose({dt,moving:netMoving,step,time,yaw,pitch,ads,recoil,reloading,healing});poseHands(netMoving);placeView(netMoving);$('zonewash').style.opacity=R.outsideZone(camera.position.x,camera.position.z,zone)?'.9':'0';}
+  if(netState?.phase==='playing'||netState?.phase==='finished'){camera.position.y=W.eyeHeight(player);orientView(dt);camera.fov+=((ads&&!R.melee(player.equipped)?(player.equipped==='marksman'?.45:.7):1.08)-camera.fov)*Math.min(1,dt*12);if(netMoving)step+=dt*10;viewRig.pose({dt,moving:netMoving,step,time,yaw,pitch,ads,recoil,reloading,healing});poseHands(netMoving);placeView(netMoving);$('zonewash').style.opacity=R.outsideZone(camera.position.x,camera.position.z,zone)?'.9':'0';}
   netSendTime-=dt;if(netSendTime<=0){netSendTime=.1;if(netConnected&&netState?.phase==='playing')netSend(state!=='playing')}
   stepEffects(dt);
 }
@@ -748,7 +911,7 @@ window.GameOnline?.bind({ready:()=>charactersReady,menu:netMenu,resume:netResume
 
 wall.scaling.set(R.START_RADIUS,1,R.START_RADIUS);zoneRing.scaling.set(R.START_RADIUS,1,R.START_RADIUS);nextRing.scaling.set(R.stages[0].radius,1,R.stages[0].radius);
 let last=performance.now();engine.runRenderLoop(()=>{const now=performance.now(),dt=Math.min((now-last)/1000,.05);last=now;try{tick(dt);scene.render()}catch(e){console.error(e);pause();startupFailure('게임 실행 오류가 발생했습니다. 새로고침해 주세요.',e);engine.stopRenderLoop()}});let resizeTimer;addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>engine.resize(),180);clearInput()});canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();pause();engine.stopRenderLoop();startupFailure('3D 화면이 중단됐습니다. 가벼운 모드로 다시 열어 주세요.')});
-controls.connect({pause,changed(){touch=controls.isTouch();clearInput();inputMode();if(state==='playing'&&!controls.editing)$('touch').hidden=!touch;document.querySelector('.desktop-help').textContent=['이동 '+['forward','left','back','right'].map(a=>controls.keyLabel(a)).join(''),'질주 '+controls.keyLabel('sprint'),'획득 '+controls.keyLabel('collect'),'재장전 '+controls.keyLabel('reload'),'구급 '+controls.keyLabel('heal'),'섬광 '+controls.keyLabel('flash'),'폭탄 '+controls.keyLabel('frag'),'시점 '+controls.keyLabel('view')].join(' · ');ui();if(state==='playing')searchLoot()}});
+controls.connect({pause,changed(){touch=controls.isTouch();clearInput();inputMode();if(state==='playing'&&!controls.editing)$('touch').hidden=!touch;document.querySelector('.desktop-help').textContent=['이동 '+['forward','left','back','right'].map(a=>controls.keyLabel(a)).join(''),'질주 '+controls.keyLabel('sprint'),'점프 '+controls.keyLabel('jump'),'앉기 '+controls.keyLabel('crouch'),'엎드리기 '+controls.keyLabel('prone'),'획득 '+controls.keyLabel('collect'),'재장전 '+controls.keyLabel('reload'),'구급 '+controls.keyLabel('heal'),'섬광 '+controls.keyLabel('flash'),'폭탄 '+controls.keyLabel('frag'),'시점 '+controls.keyLabel('view')].join(' · ');ui();if(state==='playing')searchLoot()}});
 // Read-only game state and the same pause action as the visible button.
 const context=navigator.modelContext||document.modelContext;if(context?.registerTool){for(const tool of [{name:'read_battle_status',description:'현재 생존 상태와 자기장을 확인합니다.',annotations:{readOnlyHint:true},execute:()=>({state,hp:player.hp,helmet:player.helmet,vest:player.vest,weapon:player.equipped,reserve:player.reserve,kits:player.kits,kills:player.kills,alive:netMode&&netState?netState.players.filter(p=>p.hp>0).length:enemies.length+1,online:netMode,time,zone})},{name:'pause_battle',description:'전투 메뉴를 엽니다. 혼자 플레이만 일시정지되며 온라인 전투는 계속됩니다.',annotations:{readOnlyHint:false},execute:()=>{pause();return{state}}}])try{Promise.resolve(context.registerTool({...tool,inputSchema:{type:'object',properties:{},additionalProperties:false},execute:input=>{if(input&&Object.keys(input).length)throw Error('입력 항목이 없습니다.');return tool.execute()}})).catch(()=>{})}catch{}}
 })();

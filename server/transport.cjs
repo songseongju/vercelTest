@@ -28,7 +28,7 @@ function attach(httpServer,store,{origins=[],tickMs=100}={}){
       const c=ws.context;if(c.request)return;
       if(message.type==='ping'){send(ws,{type:'pong',at:message.at});await store.append(c.room,{op:'heartbeat',id:c.id,owner:c.owner,at:now});return}
       if(message.type==='input'){await store.append(c.room,{op:'input',id:c.id,owner:c.owner,data:message.data,at:now});return}
-      if(message.type==='action'&&['ready','start','rematch','collect','reload','heal','equip','shoot','throw'].includes(message.action)){await store.append(c.room,{op:'action',id:c.id,owner:c.owner,type:message.action,data:message.data,at:now});return}
+      if(message.type==='action'&&['ready','start','rematch','collect','reload','heal','equip','shoot','throw','jump','stance'].includes(message.action)){await store.append(c.room,{op:'action',id:c.id,owner:c.owner,type:message.action,data:message.data,at:now});return}
       if(message.type==='leave'){await store.append(c.room,{op:'leave',id:c.id,owner:c.owner,at:now});ws.close(1000)}
     }catch(e){error(ws,e instanceof SyntaxError?'잘못된 메시지입니다.':e.message);if(!joined)ws.close(4003)}});
     ws.on('close',()=>{clearTimeout(deadline);const c=ws.context;if(c){groups.get(c.room)?.clients.delete(ws);store.append(c.room,{op:'drop',id:c.id,owner:c.owner,at:Date.now()}).catch(()=>{})}});

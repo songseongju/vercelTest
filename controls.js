@@ -4,14 +4,14 @@ const $=id=>document.getElementById(id),storageKey='last-field-controls-v2';
 const defaults={mode:'auto',scale:1,opacity:.85,layouts:{},keys:{
   collect:'KeyF',reload:'KeyR',heal:'Digit4',flash:'Digit5',frag:'Digit6',swap:'KeyQ',view:'KeyV',
   fists:'Digit1',melee:'Digit2',gun:'Digit3',
-  forward:'KeyW',back:'KeyS',left:'KeyA',right:'KeyD',sprint:'ShiftLeft'}};
-const names={collect:'획득',reload:'재장전',heal:'구급팩 사용',flash:'섬광탄 투척',frag:'폭탄 투척',swap:'무기 교체',view:'시점 전환',fists:'맨손',melee:'근접 무기',gun:'총기',forward:'전진',back:'후진',left:'왼쪽',right:'오른쪽',sprint:'질주'};
+  forward:'KeyW',back:'KeyS',left:'KeyA',right:'KeyD',sprint:'ShiftLeft',jump:'Space',crouch:'KeyC',prone:'KeyZ'}};
+const names={collect:'획득',reload:'재장전',heal:'구급팩 사용',flash:'섬광탄 투척',frag:'폭탄 투척',swap:'무기 교체',view:'시점 전환',fists:'맨손',melee:'근접 무기',gun:'총기',forward:'전진',back:'후진',left:'왼쪽',right:'오른쪽',sprint:'질주',jump:'점프',crouch:'앉기 / 서기',prone:'엎드리기 / 서기'};
 const actions=Object.keys(defaults.keys);
-const ids=['stick','fire','reload','heal','loot','aim','swap','view','flash','frag'];
-const dimensions={stick:108,fire:78,reload:52,heal:52,loot:66,aim:52,swap:52,view:52,flash:50,frag:50};
+const ids=['stick','fire','reload','heal','loot','aim','swap','view','flash','frag','jump','crouch','prone'];
+const dimensions={stick:108,fire:78,reload:52,heal:52,loot:66,aim:52,swap:52,view:52,flash:50,frag:50,jump:52,crouch:48,prone:48};
 const layouts={
-  landscape:{stick:[.12,.68],fire:[.91,.69],reload:[.81,.8],heal:[.93,.52],loot:[.7,.71],aim:[.82,.54],swap:[.7,.52],view:[.82,.37],flash:[.93,.37],frag:[.93,.22]},
-  portrait:{stick:[.2,.75],fire:[.85,.74],reload:[.69,.84],heal:[.86,.61],loot:[.5,.73],aim:[.66,.62],swap:[.5,.84],view:[.66,.5],flash:[.86,.49],frag:[.86,.37]}};
+  landscape:{stick:[.12,.68],fire:[.91,.69],reload:[.81,.8],heal:[.93,.52],loot:[.7,.71],aim:[.82,.54],swap:[.7,.52],view:[.82,.37],flash:[.93,.37],frag:[.93,.22],jump:[.6,.73],crouch:[.48,.78],prone:[.37,.78]},
+  portrait:{stick:[.2,.75],fire:[.85,.74],reload:[.69,.84],heal:[.86,.61],loot:[.5,.73],aim:[.66,.62],swap:[.5,.84],view:[.66,.5],flash:[.86,.49],frag:[.86,.37],jump:[.36,.59],crouch:[.18,.5],prone:[.18,.4]}};
 // Anything a browser reports as a physical key, minus the ones that would trap the player.
 const allowed=/^(Key[A-Z]|Digit[0-9]|Numpad[0-9]|Shift(Left|Right)|Control(Left|Right)|Alt(Left|Right)|Space|Arrow(Up|Down|Left|Right))$/;
 const clone=x=>JSON.parse(JSON.stringify(x)),bound=(v,min,max)=>Math.min(max,Math.max(min,Number(v)||min));
@@ -26,6 +26,8 @@ function sanitize(input){const out=clone(defaults);if(!input||typeof input!=='ob
   if(['auto','touch','mouse'].includes(input.mode))out.mode=input.mode;
   out.scale=bound(input.scale??1,.8,1.35);out.opacity=bound(input.opacity??.85,.4,1);
   for(const action of actions){const value=input.keys?.[action];if(typeof value==='string'&&allowed.test(value))out.keys[action]=value}
+  // Keep earlier custom bindings when a newly introduced action wants the same key.
+  for(const action of ['jump','crouch','prone'])if(!input.keys?.[action]&&actions.some(a=>a!==action&&out.keys[a]===out.keys[action])){const free=['Space','KeyC','KeyZ','ControlLeft','KeyX','KeyB','AltLeft'].find(code=>!Object.values(out.keys).includes(code));if(free)out.keys[action]=free}
   if(new Set(Object.values(out.keys)).size!==actions.length)out.keys=clone(defaults.keys);
   for(const orientation of ['landscape','portrait']){const l=input.layouts?.[orientation];if(l&&typeof l==='object'){out.layouts[orientation]={};for(const id of ids)if(Array.isArray(l[id])&&l[id].length===2&&l[id].every(Number.isFinite))out.layouts[orientation][id]=l[id].map(n=>bound(n,0,1))}}
   return out}
